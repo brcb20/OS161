@@ -10,3 +10,4 @@ build
 /root/
 *.swo
 *.swp
+/kern/tags
