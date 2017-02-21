@@ -305,3 +305,104 @@ cv_broadcast(struct cv *cv, struct lock *lock)
 	wchan_wakeall(cv->cv_wchan, &cv->cv_lock);
 	spinlock_release(&cv->cv_lock);
 }
+
+////////////////////////////////////////////////////////////
+//
+// RWLOCK 
+
+struct rwlock *
+rwlock_create(const char *name) 
+{
+	struct rwlock *rwlock;
+
+	rwlock = kmalloc(sizeof(*rwlock));
+	if (rwlock == NULL) {
+		return NULL;
+	}
+
+	rwlock->rwlock_name = kstrdup(name);
+	if (rwlock->rwlock_name == NULL) {
+		kfree(rwlock);
+		return NULL;
+	}
+
+	rwlock->resource_access = sem_create("resource access", 1);
+	if (rwlock->resource_access == NULL) {
+		kfree(rwlock->rwlock_name);
+		kfree(rwlock);
+		return NULL;
+	}
+
+	rwlock->general_admissions = sem_create("general admissions", 1);
+	if (rwlock->general_admissions == NULL) {
+		kfree(rwlock->rwlock_name);
+		kfree(rwlock);
+		return NULL;
+	}
+
+	rwlock->read_count = 0;
+	spinlock_init(&rwlock->read_lock);
+
+	return rwlock;
+}
+
+void
+rwlock_destroy(struct rwlock *rwlock)
+{
+	KASSERT(rwlock != NULL);
+	KASSERT(rwlock->read_count == 0);
+	KASSERT(rwlock->resource_access->sem_count == 1);
+	KASSERT(rwlock->general_admissions->sem_count == 1);
+
+	spinlock_cleanup(&rwlock->read_lock);
+	sem_destroy(rwlock->general_admissions);		
+	sem_destroy(rwlock->resource_access);		
+
+	kfree(rwlock->rwlock_name);
+	kfree(rwlock);
+}
+
+void 
+rwlock_acquire_read(struct rwlock *rwlock)
+{
+	KASSERT(rwlock != NULL);
+
+	P(rwlock->general_admissions);
+	spinlock_acquire(&rwlock->read_lock);
+	rwlock->read_count++;
+	if (rwlock->read_count == 1) {                   // First reader locks resource 
+		P(rwlock->resource_access);          // This sem is shared btw reader & writer
+	}
+	spinlock_release(&rwlock->read_lock);
+	V(rwlock->general_admissions);	
+}
+
+void 
+rwlock_release_read(struct rwlock *rwlock)
+{
+	KASSERT(rwlock != NULL);
+	spinlock_acquire(&rwlock->read_lock);
+	rwlock->read_count--;
+	if (rwlock->read_count == 0) {
+		V(rwlock->resource_access);                 // Last reader to exit unlocks resource
+	}
+	spinlock_release(&rwlock->read_lock);
+}
+
+void 
+rwlock_acquire_write(struct rwlock *rwlock)
+{
+	KASSERT(rwlock != NULL);
+	P(rwlock->general_admissions);
+	P(rwlock->resource_access);
+	KASSERT(rwlock->read_count == 0);
+}
+
+void 
+rwlock_release_write(struct rwlock *rwlock)
+{
+	KASSERT(rwlock != NULL);
+	KASSERT(rwlock->read_count == 0);
+	V(rwlock->resource_access);
+	V(rwlock->general_admissions);
+}
