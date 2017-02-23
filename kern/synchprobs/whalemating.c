@@ -40,12 +40,22 @@
 #include <test.h>
 #include <synch.h>
 
+static struct semaphore *malesem;
+static struct semaphore *femalesem;
+
 /*
  * Called by the driver during initialization.
  */
 
 void whalemating_init() {
-	return;
+	malesem = sem_create("malesem", 0);
+	if (malesem == NULL) {
+		panic("walemating init: sem create failed\n");
+	}
+	femalesem = sem_create("femalesem", 0);
+	if (femalesem == NULL) {
+		panic("walemating init: sem create failed\n");
+	}
 }
 
 /*
@@ -54,38 +64,31 @@ void whalemating_init() {
 
 void
 whalemating_cleanup() {
-	return;
+	sem_destroy(malesem);
+	sem_destroy(femalesem);
 }
 
 void
 male(uint32_t index)
 {
-	(void)index;
-	/*
-	 * Implement this function by calling male_start and male_end when
-	 * appropriate.
-	 */
-	return;
+	male_start(index);
+	P(malesem);
+	male_end(index);
 }
 
 void
 female(uint32_t index)
 {
-	(void)index;
-	/*
-	 * Implement this function by calling female_start and female_end when
-	 * appropriate.
-	 */
-	return;
+	female_start(index);
+	P(femalesem);
+	female_end(index);
 }
 
 void
 matchmaker(uint32_t index)
 {
-	(void)index;
-	/*
-	 * Implement this function by calling matchmaker_start and matchmaker_end
-	 * when appropriate.
-	 */
-	return;
+	matchmaker_start(index);
+	V(malesem);
+	V(femalesem);
+	matchmaker_end(index);
 }

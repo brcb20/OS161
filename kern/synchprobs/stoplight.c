@@ -69,13 +69,104 @@
 #include <test.h>
 #include <synch.h>
 
+#define NOQUAD -1
+
+static struct lock *lock0;
+static struct lock *lock1;
+static struct lock *lock2;
+static struct lock *lock3;
+static struct semaphore *entry_sem;
+
+
+/* Locks the specified quadrant */
+static
+void
+lock_quadrant(int quadrant)
+{
+	switch (quadrant) {
+		case 0:
+			lock_acquire(lock0);
+			break;
+		case 1:
+			lock_acquire(lock1);
+			break;
+		case 2:
+			lock_acquire(lock2);
+			break;
+		case 3:
+			lock_acquire(lock3);
+			break;
+	}
+}
+
+/* Releases the specified quadrant */
+static
+void
+unlock_quadrant(int quadrant)
+{
+	switch (quadrant) {
+		case 0:
+			lock_release(lock0);
+			break;
+		case 1:
+			lock_release(lock1);
+			break;
+		case 2:
+			lock_release(lock2);
+			break;
+		case 3:
+			lock_release(lock3);
+			break;
+	}
+}
+
+/* Gives the next quadrant (anti-clockwise) */
+static
+int 
+next_quadrant(int quadrant) 
+{
+	return (quadrant + 3)%4;
+}
+
+/* Move to next quadrant (anti-clockwise) */
+static
+int
+move_to_next_quadrant(int next_quad, int curr_quad, uint32_t index) 
+{
+	lock_quadrant(next_quad);
+	inQuadrant(next_quad, index);
+	if (curr_quad != NOQUAD) {
+		unlock_quadrant(curr_quad);
+	}
+	return next_quad;
+}
+
 /*
  * Called by the driver during initialization.
  */
 
 void
 stoplight_init() {
-	return;
+	entry_sem = sem_create("entry sem", 3);
+	if (entry_sem == NULL) {
+		panic("spotlight init: sem create failed\n");
+	}
+	lock0 = lock_create("lock0");
+	if (lock0 == NULL) {
+		panic("spotlight init: sem create failed\n");
+	}
+	lock1 = lock_create("lock1");
+	if (lock1 == NULL) {
+		panic("spotlight init: sem create failed\n");
+	}
+	lock2 = lock_create("lock2");
+	if (lock2 == NULL) {
+		panic("spotlight init: sem create failed\n");
+	}
+	lock3 = lock_create("lock3");
+	if (lock3 == NULL) {
+		panic("spotlight init: sem create failed\n");
+	}
 }
 
 /*
@@ -83,36 +174,44 @@ stoplight_init() {
  */
 
 void stoplight_cleanup() {
-	return;
+	sem_destroy(entry_sem);
+	lock_destroy(lock0);
+	lock_destroy(lock1);
+	lock_destroy(lock2);
+	lock_destroy(lock3);
 }
 
 void
 turnright(uint32_t direction, uint32_t index)
 {
-	(void)direction;
-	(void)index;
-	/*
-	 * Implement this function.
-	 */
-	return;
+	int quad = (int)direction;
+	P(entry_sem);
+	quad = move_to_next_quadrant(quad, NOQUAD, index);
+	leaveIntersection(index);
+	unlock_quadrant(quad);
+	V(entry_sem);
 }
 void
 gostraight(uint32_t direction, uint32_t index)
 {
-	(void)direction;
-	(void)index;
-	/*
-	 * Implement this function.
-	 */
-	return;
+	int quad = (int)direction;
+	P(entry_sem);
+	quad = move_to_next_quadrant(quad, NOQUAD, index);
+	quad = move_to_next_quadrant(next_quadrant(quad), quad, index);
+	leaveIntersection(index);
+	unlock_quadrant(quad);
+	V(entry_sem);
 }
 void
 turnleft(uint32_t direction, uint32_t index)
 {
-	(void)direction;
-	(void)index;
-	/*
-	 * Implement this function.
-	 */
-	return;
+	int quad = (int)direction;
+	P(entry_sem);
+	quad = move_to_next_quadrant(quad, NOQUAD, index);
+	quad = move_to_next_quadrant(next_quadrant(quad), quad, index);
+	quad = move_to_next_quadrant(next_quadrant(quad), quad, index);
+	leaveIntersection(index);
+	unlock_quadrant(quad);
+	V(entry_sem);
 }
+
