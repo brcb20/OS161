@@ -92,6 +92,8 @@ readthread(void *junk1, unsigned long num)
 	V(exitsem);
 }
 
+// Next time you write a test and want to control the order of execution
+// use wrapper such as read_wrapper or write_wrapper
 int rwtest(int nargs, char **args) {
 	(void)nargs;
 	(void)args;
