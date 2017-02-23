@@ -381,6 +381,7 @@ void
 rwlock_release_read(struct rwlock *rwlock)
 {
 	KASSERT(rwlock != NULL);
+	KASSERT(rwlock->read_count > 0);
 	spinlock_acquire(&rwlock->read_lock);
 	rwlock->read_count--;
 	if (rwlock->read_count == 0) {
