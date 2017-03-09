@@ -37,6 +37,8 @@
  */
 
 #include <spinlock.h>
+#include <types.h>
+#include <limits.h>
 
 struct addrspace;
 struct thread;
@@ -63,6 +65,10 @@ struct proc {
 	char *p_name;			/* Name of this process */
 	struct spinlock p_lock;		/* Lock for this structure */
 	unsigned p_numthreads;		/* Number of threads in this process */
+
+	/* PIDs */
+	pid_t pid;
+	pid_t ppid;              /* Parent process */
 
 	/* VM */
 	struct addrspace *p_addrspace;	/* virtual address space */

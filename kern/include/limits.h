@@ -43,10 +43,12 @@
 #define ARG_MAX         __ARG_MAX
 #define PID_MIN         __PID_MIN
 #define PID_MAX         __PID_MAX
+#define PROC_MAX 		__PROC_MAX
 #define PIPE_BUF        __PIPE_BUF
 #define NGROUPS_MAX     __NGROUPS_MAX
 #define LOGIN_NAME_MAX  __LOGIN_NAME_MAX
 #define OPEN_MAX        __OPEN_MAX
+#define OPEN_FILE_MAX   __OPEN_FILE_MAX
 #define IOV_MAX         __IOV_MAX
 
 #endif /* _LIMITS_H_ */

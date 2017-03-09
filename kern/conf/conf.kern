@@ -283,6 +283,8 @@ file      lib/kprintf.c
 file      lib/misc.c
 file      lib/time.c
 file      lib/uio.c
+file 	  lib/table.c
+file 	  lib/section.c
 
 defoption noasserts
 
@@ -451,6 +453,7 @@ file		test/hmacunit.c
 file		test/kmalloctest.c
 file		test/fstest.c
 file		test/lib.c
+file 	    test/tabletest.c
 
 optfile net	test/nettest.c
 

@@ -50,6 +50,9 @@
 /* data structure tests */
 int arraytest(int, char **);
 int arraytest2(int, char **);
+int tabletest(int, char **);
+int tabletest2(int, char **);
+int tabletest3(int, char **);
 int bitmaptest(int, char **);
 int threadlisttest(int, char **);
 
