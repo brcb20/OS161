@@ -30,6 +30,15 @@
 #ifndef _PROC_H_
 #define _PROC_H_
 
+
+#ifndef FDINLINE
+#define FDINLINE INLINE
+#endif
+
+#ifndef CPINLINE
+#define CPINLINE INLINE
+#endif
+
 /*
  * Definition of a process.
  *
@@ -39,10 +48,23 @@
 #include <spinlock.h>
 #include <types.h>
 #include <limits.h>
+#include <table.h>
 
 struct addrspace;
 struct thread;
+struct semaphore;
 struct vnode;
+struct fd;
+
+/* 
+ * File descriptor table 
+ */
+DECLTABLE(fd, FDINLINE);
+DEFTABLE(fd, FDINLINE);
+
+/* 
+ * Child Processes array
+ */
 
 /*
  * Process structure.
@@ -76,7 +98,14 @@ struct proc {
 	/* VFS */
 	struct vnode *p_cwd;		/* current working directory */
 
-	/* add more material here as needed */
+	/* Child process array */
+
+	/* File descriptor table */
+	struct fdtable *fds;
+
+	/* Handle exit */
+	int exit_val;
+	struct semaphore *exit_sem;
 };
 
 /* This is the process structure for the kernel and for kernel-only threads. */
@@ -84,6 +113,9 @@ extern struct proc *kproc;
 
 /* Call once during system startup to allocate data structures. */
 void proc_bootstrap(void);
+
+/* Call once during system startup to allocate process table data struct */
+void proctable_bootstrap(void);
 
 /* Create a fresh process for use by runprogram(). */
 struct proc *proc_create_runprogram(const char *name);

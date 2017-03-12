@@ -41,18 +41,88 @@
  * Unless you're implementing multithreaded user processes, the only
  * process that will have more than one thread is the kernel process.
  */
+#ifndef PROCINLINE
+#define PROCINLINE INLINE
+#endif
 
+#define FDINLINE
+#define CPINLINE
+
+#include <kern/errno.h>
 #include <types.h>
 #include <spl.h>
 #include <proc.h>
 #include <current.h>
 #include <addrspace.h>
 #include <vnode.h>
+#include <table.h>
+#include <synch.h>
+
 
 /*
  * The process for the kernel; this holds all the kernel-only threads.
  */
 struct proc *kproc;
+
+/*
+ * The process table; this holds all user level processes
+ */
+DECLTABLE(proc, PROCINLINE);
+DEFTABLE(proc, PROCINLINE);
+struct proctable *ptb;
+
+unsigned volatile proc_num;
+unsigned long volatile pid_ref;
+struct spinlock pid_ref_lock;
+
+/* 
+ * Add process to the proc table
+ */
+static
+int
+proc_setpid(struct proc *proc)
+{
+	int result;
+	unsigned long tmp_pid;
+
+	/* Suppress warning */
+	tmp_pid = 0;
+
+	spinlock_acquire(&pid_ref_lock);
+	++proc_num;
+	if (proc_num > PROC_MAX) {
+		--proc_num;
+		spinlock_release(&pid_ref_lock);
+		return EMPROC;
+	}
+	if (pid_ref == PID_MAX + 1)
+		pid_ref = PID_MIN;
+	spinlock_release(&pid_ref_lock);
+
+rewind:
+	result = proctable_setfirst(ptb, proc, pid_ref, &tmp_pid);
+
+	if (result == 0) {
+		proc->pid = (pid_t)tmp_pid;
+		spinlock_acquire(&pid_ref_lock);
+		if (tmp_pid >= pid_ref)
+			pid_ref = tmp_pid + 1;
+		spinlock_release(&pid_ref_lock);
+	}
+	else {
+		spinlock_acquire(&pid_ref_lock);
+		if (pid_ref != PID_MIN) {
+			pid_ref = PID_MIN;
+			spinlock_release(&pid_ref_lock);
+			goto rewind;
+		}
+		--proc_num;
+		spinlock_release(&pid_ref_lock);
+	}
+
+
+	return result;
+}
 
 /*
  * Create a proc structure.
@@ -72,9 +142,19 @@ proc_create(const char *name)
 		kfree(proc);
 		return NULL;
 	}
+	/* Handle exit */
+	proc->exit_sem = sem_create("exit sem", 0);
+	if (proc->exit_sem == NULL) {
+		kfree(proc->p_name);
+		kfree(proc);
+		return NULL;
+	}
+	proc->exit_val = 0;
 
 	proc->p_numthreads = 0;
 	spinlock_init(&proc->p_lock);
+
+	/* PID will be set separately */
 
 	/* VM fields */
 	proc->p_addrspace = NULL;
@@ -86,30 +166,21 @@ proc_create(const char *name)
 }
 
 /*
- * Destroy a proc structure.
+ * Exit a process
  *
- * Note: nothing currently calls this. Your wait/exit code will
- * probably want to do so.
+ * Cleans up process structure but leaves bare bones for
+ * parent process to get exit value
  */
+static
 void
-proc_destroy(struct proc *proc)
+proc_exit(struct proc *proc)
 {
 	/*
-	 * You probably want to destroy and null out much of the
-	 * process (particularly the address space) at exit time if
-	 * your wait/exit design calls for the process structure to
-	 * hang around beyond process exit. Some wait/exit designs
-	 * do, some don't.
+	 * This should only be called by the last process thread
+	 * when it exits
 	 */
-
 	KASSERT(proc != NULL);
 	KASSERT(proc != kproc);
-
-	/*
-	 * We don't take p_lock in here because we must have the only
-	 * reference to this structure. (Otherwise it would be
-	 * incorrect to destroy it.)
-	 */
 
 	/* VFS fields */
 	if (proc->p_cwd) {
@@ -166,10 +237,68 @@ proc_destroy(struct proc *proc)
 	}
 
 	KASSERT(proc->p_numthreads == 0);
-	spinlock_cleanup(&proc->p_lock);
+}
 
+
+
+
+/*
+ * Destroy a proc structure.
+ *
+ * Note: Called by the parent to clean up
+ */
+void
+proc_destroy(struct proc *proc)
+{
+	/*
+	 * You probably want to destroy and null out much of the
+	 * process (particularly the address space) at exit time if
+	 * your wait/exit design calls for the process structure to
+	 * hang around beyond process exit. Some wait/exit designs
+	 * do, some don't.
+	 */
+
+	KASSERT(proc != NULL);
+	KASSERT(proc != kproc);
+	/* Ensure proc_exit has been called */
+	KASSERT(proc->p_addrspace == NULL);
+
+	/*
+	 * We don't take p_lock in here because we must have the only
+	 * reference to this structure. (Otherwise it would be
+	 * incorrect to destroy it.)
+	 */
+
+	if (proc->pid >= PID_MIN  &&
+		proc->pid <= PID_MAX  && 
+		proctable_get(ptb, (unsigned long)proc->pid) == proc) {
+		proctable_remove(ptb, (unsigned long)proc->pid);
+		spinlock_acquire(&pid_ref_lock);
+		--proc_num;
+		spinlock_release(&pid_ref_lock);
+	}
+
+	proc->exit_val = 0;
+	sem_destroy(proc->exit_sem);
+	spinlock_cleanup(&proc->p_lock);
 	kfree(proc->p_name);
 	kfree(proc);
+}
+
+/* Create process table */
+void
+proctable_bootstrap(void)
+{
+	ptb = proctable_create();
+	if (ptb == NULL) {
+		panic("proctable_create for process table failed\n");
+	}
+	/* Extra initialization for proc table */
+	if (proctable_setsize(ptb, PID_MAX+1)) 
+		panic("proctable allocate size failed\n");
+	pid_ref = PID_MIN;
+	proc_num = 0;
+	spinlock_init(&pid_ref_lock);
 }
 
 /*
@@ -178,6 +307,7 @@ proc_destroy(struct proc *proc)
 void
 proc_bootstrap(void)
 {
+	/* Kernel process */
 	kproc = proc_create("[kernel]");
 	if (kproc == NULL) {
 		panic("proc_create for kproc failed\n");
@@ -189,6 +319,8 @@ proc_bootstrap(void)
  *
  * It will have no address space and will inherit the current
  * process's (that is, the kernel menu's) current directory.
+ * It will be issued a pid and it's parent pid will be set, if 
+ * kproc is parent then ppid is set to 0.
  */
 struct proc *
 proc_create_runprogram(const char *name)
@@ -200,8 +332,22 @@ proc_create_runprogram(const char *name)
 		return NULL;
 	}
 
-	/* VM fields */
+	/* TODO may move outside to become part of
+	 * fork  so you can return the correct error 
+	 * values to errno 
+	 */
+	/* pid */
+	if (proc_setpid(newproc)) {
+		proc_destroy(newproc);
+		return NULL;
+	}
+	/* ppid */
+	if (curproc == kproc) 
+		newproc->ppid = 0;
+	else
+		newproc->ppid = curproc->pid;
 
+	/* VM fields */
 	newproc->p_addrspace = NULL;
 
 	/* VFS fields */
@@ -274,6 +420,10 @@ proc_remthread(struct thread *t)
 	spl = splhigh();
 	t->t_proc = NULL;
 	splx(spl);
+
+	/* Need to remove process if no more threads but leave bare bones */
+	if (proc->p_numthreads == 0) 
+		proc_exit(proc);
 }
 
 /*

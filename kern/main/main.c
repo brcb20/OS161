@@ -130,6 +130,7 @@ boot(void)
 	kprintf_bootstrap();
 	thread_start_cpus();
 	test161_bootstrap();
+	proctable_bootstrap();
 
 	/* Default bootfs - but ignore failure, in case emu0 doesn't exist */
 	vfs_setbootfs("emu0");
