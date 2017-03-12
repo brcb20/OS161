@@ -101,6 +101,10 @@ int semu20(int, char **);
 int semu21(int, char **);
 int semu22(int, char **);
 
+/* process table tests */
+int proctest(int, char **);
+int proctest2(int, char **);
+
 /* filesystem tests */
 int fstest(int, char **);
 int readstress(int, char **);

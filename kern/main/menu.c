@@ -129,12 +129,14 @@ common_prog(int nargs, char **args)
 
 	tc = thread_count;
 
+	/* TODO replace with call to sys_fork */
 	result = thread_fork(args[0] /* thread name */,
 			proc /* new process */,
 			cmd_progthread /* thread function */,
 			args /* thread arg */, nargs /* thread arg */);
 	if (result) {
 		kprintf("thread_fork failed: %s\n", strerror(result));
+		/* This will currently fail */
 		proc_destroy(proc);
 		return result;
 	}
@@ -613,6 +615,8 @@ static const char *testmenu[] = {
 	"[sp2] Stoplight test         (1)    ",
 #endif
 	"[semu1-22] Semaphore unit tests     ",
+	"[pt1] Process table test            ",
+	"[pt2] Process table concurrency test ",
 	"[fs1] Filesystem test               ",
 	"[fs2] FS read stress                ",
 	"[fs3] FS write stress               ",
@@ -791,6 +795,10 @@ static struct {
 	{ "semu20",	semu20 },
 	{ "semu21",	semu21 },
 	{ "semu22",	semu22 },
+
+	/* Process table tests */
+	{ "pt1", 	proctest },
+	{ "pt2", 	proctest2 },
 
 	/* file system assignment tests */
 	{ "fs1",	fstest },

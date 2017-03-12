@@ -389,6 +389,7 @@ file      vfs/devnull.c
 file      syscall/loadelf.c
 file      syscall/runprogram.c
 file      syscall/time_syscalls.c
+file 	  syscall/proc_syscall.c
 
 #
 # Startup and initialization
@@ -454,6 +455,7 @@ file		test/kmalloctest.c
 file		test/fstest.c
 file		test/lib.c
 file 	    test/tabletest.c
+file 		test/proctest.c
 
 optfile net	test/nettest.c
 
