@@ -5,6 +5,7 @@
 #include <spinlock.h>
 #include <array.h>
 
+/* Don't make smaller than 256 */
 #define SECTION_SIZE 256
 /* For testing */
 #define SECTION_CHECKED
