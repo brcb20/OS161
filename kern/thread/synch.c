@@ -187,8 +187,7 @@ lock_acquire(struct lock *lock)
 {
 	KASSERT(lock != NULL);
 	KASSERT(curthread->t_in_interrupt == false);
-
-	if (lock_do_i_hold(lock)) { return; } // This could be a KASSERT instead
+	KASSERT(!lock_do_i_hold(lock));
 
 	spinlock_acquire(&lock->lk_spinlock);
 	while (lock->lk_thread != NULL) {
