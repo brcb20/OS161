@@ -58,7 +58,6 @@
 #include <table.h>
 #include <synch.h>
 
-
 /*
  * The process for the kernel; this holds all the kernel-only threads.
  */
@@ -69,11 +68,11 @@ struct proc *kproc;
  */
 DECLTABLE(proc, PROCINLINE);
 DEFTABLE(proc, PROCINLINE);
-struct proctable *ptb;
+static struct proctable *ptb;
 
-unsigned volatile proc_num;
-unsigned long volatile pid_ref;
-struct spinlock pid_ref_lock;
+static unsigned volatile proc_num;
+static unsigned long volatile pid_ref;
+static struct spinlock proc_spinlock;
 
 /* 
  * Add process to the proc table
@@ -82,44 +81,45 @@ static
 int
 proc_setpid(struct proc *proc)
 {
-	int result;
 	unsigned long tmp_pid;
+	int result;
+
+	KASSERT(ptb != NULL);
+	KASSERT(proc != NULL);
 
 	/* Suppress warning */
 	tmp_pid = 0;
 
-	spinlock_acquire(&pid_ref_lock);
-	++proc_num;
-	if (proc_num > PROC_MAX) {
-		--proc_num;
-		spinlock_release(&pid_ref_lock);
+	spinlock_acquire(&proc_spinlock);
+	if (proc_num >= PROC_MAX) {
+		spinlock_release(&proc_spinlock);
 		return EMPROC;
 	}
+	++proc_num;
 	if (pid_ref == PID_MAX + 1)
 		pid_ref = PID_MIN;
-	spinlock_release(&pid_ref_lock);
+	spinlock_release(&proc_spinlock);
 
 rewind:
 	result = proctable_setfirst(ptb, proc, pid_ref, &tmp_pid);
 
 	if (result == 0) {
 		proc->pid = (pid_t)tmp_pid;
-		spinlock_acquire(&pid_ref_lock);
+		spinlock_acquire(&proc_spinlock);
 		if (tmp_pid >= pid_ref)
 			pid_ref = tmp_pid + 1;
-		spinlock_release(&pid_ref_lock);
+		spinlock_release(&proc_spinlock);
 	}
 	else {
-		spinlock_acquire(&pid_ref_lock);
+		spinlock_acquire(&proc_spinlock);
 		if (pid_ref != PID_MIN) {
 			pid_ref = PID_MIN;
-			spinlock_release(&pid_ref_lock);
+			spinlock_release(&proc_spinlock);
 			goto rewind;
 		}
 		--proc_num;
-		spinlock_release(&pid_ref_lock);
+		spinlock_release(&proc_spinlock);
 	}
-
 
 	return result;
 }
@@ -273,9 +273,9 @@ proc_destroy(struct proc *proc)
 		proc->pid <= PID_MAX  && 
 		proctable_get(ptb, (unsigned long)proc->pid) == proc) {
 		proctable_remove(ptb, (unsigned long)proc->pid);
-		spinlock_acquire(&pid_ref_lock);
+		spinlock_acquire(&proc_spinlock);
 		--proc_num;
-		spinlock_release(&pid_ref_lock);
+		spinlock_release(&proc_spinlock);
 	}
 
 	proc->exit_val = 0;
@@ -294,11 +294,10 @@ proctable_bootstrap(void)
 		panic("proctable_create for process table failed\n");
 	}
 	/* Extra initialization for proc table */
-	if (proctable_setsize(ptb, PID_MAX+1)) 
-		panic("proctable allocate size failed\n");
+	proctable_setsize(ptb, PID_MAX + 1);
 	pid_ref = PID_MIN;
 	proc_num = 0;
-	spinlock_init(&pid_ref_lock);
+	spinlock_init(&proc_spinlock);
 }
 
 /*

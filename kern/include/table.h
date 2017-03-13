@@ -78,7 +78,7 @@ TABLEINLINE unsigned long table_num(const struct table *);
 TABLEINLINE void *table_get(const struct table *, unsigned long index);
 TABLEINLINE int table_set(struct table *, unsigned long index, void *val);
 TABLEINLINE int table_setfirst(struct table *, void *val, unsigned long start, unsigned long *index_ret);
-int table_setsize(struct table *, unsigned long num);
+void table_setsize(struct table *, unsigned long num);
 TABLEINLINE int table_add(struct table *, void *val, unsigned long *index_ret);
 TABLEINLINE void table_remove(struct table *, unsigned long index);
 
@@ -101,6 +101,7 @@ table_get(const struct table *tb, unsigned long index)
 	void *result;
 	unsigned rem = index % SECTION_SIZE;
 	unsigned sect_index = (index - rem)/SECTION_SIZE;
+
 	if ((containerarray_num(tb->containers) <= sect_index) ||
 	    (container = containerarray_get(tb->containers, sect_index)) == NULL) {
 		return NULL;
@@ -119,15 +120,53 @@ table_get(const struct table *tb, unsigned long index)
 TABLEINLINE int 
 table_set(struct table *tb, unsigned long index, void *val)
 {
+	TABLEASSERT(tb != NULL);
 	TABLEASSERT(index < tb->max);
 	TABLEASSERT(val != NULL);
 
 	bool newadd;
-	struct container *container;
-	unsigned rem = index % SECTION_SIZE,
+	int tmp;
+	unsigned i, container_num, container_index,
+			 rem = index % SECTION_SIZE,
 			 sect_index = (index - rem)/SECTION_SIZE;
+	struct container *container = NULL;
 
-	container = containerarray_get(tb->containers, sect_index);
+	/* Suppress warning */
+	container_index = 0;
+
+	if (!lock_do_i_hold(tb->container_lock))
+		lock_acquire(tb->container_lock);
+	container_num = containerarray_num(tb->containers);
+
+	for (i = container_num; i <= sect_index; i++) {
+		container = kmalloc(sizeof(*container));
+		/*
+		 * If we fail to alloc each container up to the 
+		 * container we need then we must fail gracefully
+		 * and make sure that the size is set back to the
+		 * last initialized container
+		 */
+		if (container == NULL) {
+			goto fail;
+		}
+		container->section_lock = rwlock_create("Section lock");
+		if (container->section_lock  == NULL) {
+			kfree(container);
+			goto fail;
+		}
+		container->section = NULL;
+		tmp = containerarray_add(tb->containers, container, &container_index);
+		if (tmp) {
+			rwlock_destroy(container->section_lock);
+			kfree(container);
+			goto fail;
+		}
+		TABLEASSERT(i == container_index);
+	}
+	lock_release(tb->container_lock);
+
+	if (container == NULL)
+		container = containerarray_get(tb->containers, sect_index);
 
 	/* Lock the section being modified */
 	rwlock_acquire_write(container->section_lock);
@@ -147,6 +186,10 @@ table_set(struct table *tb, unsigned long index, void *val)
 
 	return 0;
 
+fail:
+	lock_release(tb->container_lock);
+	return ENOMEM;
+
 }
 
 TABLEINLINE 
@@ -158,17 +201,28 @@ table_setfirst(struct table *tb, void *val, unsigned long start, unsigned long *
 	TABLEASSERT(index_ret != NULL);
 
 	struct container *container;
-	int index;
-	unsigned i, 
+	int index, result;
+	unsigned i, container_num,
 			 start_section_index = start % SECTION_SIZE,
 			 start_section = (start - start_section_index)/SECTION_SIZE,
 			 max_containers = (tb->max - tb->max % SECTION_SIZE)/SECTION_SIZE + 1;
 
+start:
 	/* Table is full */
 	if (tb->num == tb->max)
 		return 2;
 
-	for (i = start_section; i < max_containers; i++) {
+	lock_acquire(tb->container_lock);
+	container_num = containerarray_num(tb->containers);
+	if (start_section >= container_num) {
+		result = table_set(tb, start, val);
+		if (!result)
+			*index_ret = start;
+		return result;
+	}
+	lock_release(tb->container_lock);
+
+	for (i = start_section; i < container_num; i++) {
 		container = containerarray_get(tb->containers, i);
 		TABLEASSERT(container != NULL);
 		/* Lock the section being modified */
@@ -185,10 +239,20 @@ table_setfirst(struct table *tb, void *val, unsigned long start, unsigned long *
 			goto success;
 		}
 		rwlock_release_write(container->section_lock);
+
+		lock_acquire(tb->container_lock);
+		container_num = containerarray_num(tb->containers);
+		lock_release(tb->container_lock);
 	}
 
-	/* No space in this part of the table */ 
-	return 2;
+	/* No space in the table for start pos to end  */ 
+	if (container_num == max_containers)
+		return 2;
+
+	start_section_index = 0; 
+	start_section = i;
+	start = start_section * SECTION_SIZE;
+	goto start;
 
 success:
 	spinlock_acquire(&tb->table_lock);
@@ -268,7 +332,7 @@ end:
 	INLINE T *TABLE##_get(const struct TABLE *tb, unsigned long index); 		\
 	INLINE int TABLE##_set(struct TABLE *tb, unsigned long index, T *val); 		\
 	INLINE int TABLE##_setfirst(struct TABLE *tb, void *val, unsigned long start, unsigned long *index_ret); \
-	INLINE int TABLE##_setsize(struct TABLE *tb, unsigned long num);			\
+	INLINE void TABLE##_setsize(struct TABLE *tb, unsigned long num);			\
 	INLINE int TABLE##_add(struct TABLE *tb, T *val, unsigned long *index_ret); \
 	INLINE void TABLE##_remove(struct TABLE *tb, unsigned long index)
 
@@ -327,10 +391,10 @@ end:
 		return table_setfirst(&tb->my_tb, val, start, index_ret); 	\
 	} 														   \
 															   \
-	INLINE int 												   \
+	INLINE void 											   \
 	TABLE##_setsize(struct TABLE *tb, unsigned long num)       \
 	{ 														   \
-		return table_setsize(&tb->my_tb, num); 					   \
+		table_setsize(&tb->my_tb, num); 					   \
 	} 														   \
  															   \
 	INLINE int 												   \

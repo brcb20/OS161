@@ -31,7 +31,7 @@ proctest(int nargs, char **args)
 		kprintf("Start of loop %u...\n", j);
 		for (i = j*PROC_MAX; i < (j+1)*PROC_MAX; i++) {
 			proc[i%PROC_MAX] = proc_create_runprogram("process");
-			KASSERT(proc != NULL);
+			KASSERT(proc[i%PROC_MAX] != NULL);
 			KASSERT((unsigned)proc[i%PROC_MAX]->pid == i+PID_MIN);
 		}
 		for (i = 0; i < PROC_MAX; i++) {
@@ -71,6 +71,7 @@ proc_create_recursive(void *procarray, unsigned long index)
 	struct proc **testproc = (struct proc **)procarray;
 	unsigned i = 0,
 			 num = (unsigned)index;
+#define PMAX 1000
 
 	kprintf_n("Thread %u starting\n", num);
 	if (index == NTHREADS-1) { V(blocksem); }

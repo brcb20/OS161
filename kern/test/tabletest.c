@@ -104,6 +104,23 @@ tabletest(int nargs, char **args)
 
 	table_destroy(tb);
 		
+	kprintf("Second part of table test...\n");
+	tb = table_create();
+	table_setsize(tb, BIGTESTSIZE);
+	for (i=0; i<BIGTESTSIZE; i++) {
+		result = table_setfirst(tb, (void *)NTH(i), 0, &x);
+		KASSERT(result == 0);
+		KASSERT(x == i);
+		KASSERT(table_num(tb) == i+1);
+		KASSERT(table_get(tb, i) == (void *)NTH(i));
+	}
+	for (i=0; i<BIGTESTSIZE; i++) {
+		table_remove(tb, i);
+		KASSERT(table_num(tb) == BIGTESTSIZE - (i+1));
+	}
+	table_destroy(tb);
+
+
 	kprintf("Done.\n");
 
 	return 0;
