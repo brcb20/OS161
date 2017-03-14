@@ -86,7 +86,7 @@
 #define __OPEN_MAX      128
 
 /* Max open files (5MB) */
-#define __OPEN_FILE_MAX 5120000
+#define __OPEN_FILE_MAX 1638400
 
 /* Max bytes for atomic pipe I/O -- see description in the pipe() man page */
 #define __PIPE_BUF      512

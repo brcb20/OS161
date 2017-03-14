@@ -47,8 +47,7 @@
 
 #include <spinlock.h>
 #include <types.h>
-#include <limits.h>
-#include <table.h>
+#include <array.h>
 
 struct addrspace;
 struct thread;
@@ -57,14 +56,16 @@ struct vnode;
 struct fd;
 
 /* 
- * File descriptor table 
+ * File descriptor array
  */
-DECLTABLE(fd, FDINLINE);
-DEFTABLE(fd, FDINLINE);
+DECLARRAY(fd, FDINLINE);
+DEFARRAY(fd, FDINLINE);
 
 /* 
  * Child Processes array
  */
+DECLARRAY_BYTYPE(cparray, pid_t, CPINLINE);
+DEFARRAY_BYTYPE(cparray, pid_t, CPINLINE);
 
 /*
  * Process structure.
@@ -99,11 +100,13 @@ struct proc {
 	struct vnode *p_cwd;		/* current working directory */
 
 	/* Child process array */
+	struct cparray *cps;
 
 	/* File descriptor table */
-	struct fdtable *fds;
+	struct fdarray *fds;
 
 	/* Handle exit */
+	bool exited;
 	int exit_val;
 	struct semaphore *exit_sem;
 };

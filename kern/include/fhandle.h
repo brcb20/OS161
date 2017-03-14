@@ -11,7 +11,7 @@ struct vnode;
 struct fhandle {
 	struct spinlock 	 fh_lock; 	/* Lock for this structure */
 	unsigned volatile 	refcount; 	/* Number of connections to this handler */
-	unsigned 			  offset;	/* offset in file */
+	off_t  				  offset;	/* offset in file */
 	int                     mode;	/* file handle mode */
 	struct vnode 		 *open_v;   /* vnode being handled */
 };

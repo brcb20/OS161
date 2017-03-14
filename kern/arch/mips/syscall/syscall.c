@@ -35,6 +35,8 @@
 #include <thread.h>
 #include <current.h>
 #include <syscall.h>
+#include <proc_syscall.h>
+#include <file_syscall.h>
 
 
 /*
@@ -97,7 +99,7 @@ syscall(struct trapframe *tf)
 	 * like write.
 	 */
 
-	retval = 0;
+	retval = err = 0;
 
 	switch (callno) {
 	    case SYS_reboot:
@@ -109,6 +111,17 @@ syscall(struct trapframe *tf)
 				 (userptr_t)tf->tf_a1);
 		break;
 
+		case SYS__exit:
+		sys__exit(tf->tf_a0);
+		break;
+
+		case SYS_read:
+		err = sys_read(tf->tf_a0, (userptr_t)tf->tf_a1, tf->tf_a2, &retval);
+		break;
+
+		case SYS_write:
+		err = sys_write(tf->tf_a0, (userptr_t)tf->tf_a1, tf->tf_a2, &retval);
+		break;
 	    /* Add stuff here */
 
 	    default:

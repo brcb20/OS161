@@ -48,14 +48,17 @@
 #define FDINLINE
 #define CPINLINE
 
-#include <kern/errno.h>
 #include <types.h>
+#include <kern/errno.h>
+#include <kern/fcntl.h>
 #include <spl.h>
 #include <proc.h>
 #include <current.h>
 #include <addrspace.h>
 #include <vnode.h>
 #include <table.h>
+#include <limits.h>
+#include <fhandle.h>
 #include <synch.h>
 
 /*
@@ -149,6 +152,26 @@ proc_create(const char *name)
 		kfree(proc);
 		return NULL;
 	}
+	/* Child process array */
+	proc->cps = cparray_create();
+	if (proc->cps == NULL) {
+		sem_destroy(proc->exit_sem);
+		kfree(proc->p_name);
+		kfree(proc);
+		return NULL;
+	}
+	/* file descriptor array */
+	proc->fds = fdarray_create();
+	if (proc->fds == NULL) {
+		cparray_destroy(proc->cps);
+		sem_destroy(proc->exit_sem);
+		kfree(proc->p_name);
+		kfree(proc);
+		return NULL;
+	}
+
+	/* Exit values */
+	proc->exited = false;
 	proc->exit_val = 0;
 
 	proc->p_numthreads = 0;
@@ -181,6 +204,9 @@ proc_exit(struct proc *proc)
 	 */
 	KASSERT(proc != NULL);
 	KASSERT(proc != kproc);
+
+	int index;
+	struct fd *fd;
 
 	/* VFS fields */
 	if (proc->p_cwd) {
@@ -236,6 +262,25 @@ proc_exit(struct proc *proc)
 		as_destroy(as);
 	}
 
+	/*
+	 * Cleanup file descriptors
+	 */
+	while ((index = fdarray_num(proc->fds)) != 0) {
+		fd = fdarray_get(proc->fds, index - 1);
+		if (fd != NULL)
+			fh_dec(fd);
+		fdarray_remove(proc->fds, index - 1);
+	}
+	fdarray_destroy(proc->fds);
+	
+	/*
+	 * Cleanup child process array
+	 */
+	while ((index = cparray_num(proc->cps)) != 0) {
+		cparray_remove(proc->cps, index - 1);
+	}
+	cparray_destroy(proc->cps);
+
 	KASSERT(proc->p_numthreads == 0);
 }
 
@@ -278,7 +323,6 @@ proc_destroy(struct proc *proc)
 		spinlock_release(&proc_spinlock);
 	}
 
-	proc->exit_val = 0;
 	sem_destroy(proc->exit_sem);
 	spinlock_cleanup(&proc->p_lock);
 	kfree(proc->p_name);
@@ -324,7 +368,11 @@ proc_bootstrap(void)
 struct proc *
 proc_create_runprogram(const char *name)
 {
+	int result;
+	unsigned index;
 	struct proc *newproc;
+	struct fd *fd;
+	char *path;
 
 	newproc = proc_create(name);
 	if (newproc == NULL) {
@@ -341,11 +389,46 @@ proc_create_runprogram(const char *name)
 		return NULL;
 	}
 	/* ppid */
-	if (curproc == kproc) 
+	if (curproc == kproc)
 		newproc->ppid = 0;
 	else
 		newproc->ppid = curproc->pid;
 
+	/*
+	 * TODO might be able to use fork instead of this
+	 */
+	/* Stds */
+	if (newproc->ppid == 0) {
+		path = kmalloc(sizeof(char)*5);
+		if (path == NULL) {
+			proc_destroy(newproc);
+			return NULL;
+		}
+		strcpy(path, "con:");
+		result = fh_add(O_RDONLY, path, &fd);
+		if (result) {
+			proc_destroy(newproc);
+			kfree(path);
+			return NULL;
+		}
+		fdarray_add(newproc->fds, fd, &index);
+		for (int i = 0; i < 2; i++) {
+			strcpy(path, "con:");
+			result = fh_add(O_WRONLY, path, &fd);
+			if (result) {
+				while (fdarray_num(newproc->fds) != 0) {
+					fh_dec(fdarray_get(newproc->fds, 0));
+					fdarray_remove(newproc->fds, 0);
+				}
+				proc_destroy(newproc);
+				kfree(path);
+				return NULL;
+			}
+			fdarray_add(newproc->fds, fd, &index);
+		}	
+		kfree(path);
+	}
+	
 	/* VM fields */
 	newproc->p_addrspace = NULL;
 
