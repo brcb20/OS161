@@ -285,6 +285,7 @@ file      lib/time.c
 file      lib/uio.c
 file 	  lib/table.c
 file 	  lib/section.c
+file 	  lib/fhandle.c
 
 defoption noasserts
 
@@ -456,6 +457,7 @@ file		test/fstest.c
 file		test/lib.c
 file 	    test/tabletest.c
 file 		test/proctest.c
+file 		test/fhandletest.c
 
 optfile net	test/nettest.c
 

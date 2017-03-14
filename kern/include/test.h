@@ -105,6 +105,9 @@ int semu22(int, char **);
 int proctest(int, char **);
 int proctest2(int, char **);
 
+/* Open file table tests */
+int fhtest(int, char **);
+
 /* filesystem tests */
 int fstest(int, char **);
 int readstress(int, char **);

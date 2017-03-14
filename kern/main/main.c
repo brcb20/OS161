@@ -47,7 +47,7 @@
 #include <vfs.h>
 #include <device.h>
 #include <syscall.h>
-#include <fh.h>
+#include <fhandle.h>
 #include <test.h>
 #include <kern/test161.h>
 #include <version.h>
@@ -131,6 +131,7 @@ boot(void)
 	thread_start_cpus();
 	test161_bootstrap();
 	proctable_bootstrap();
+	oft_bootstrap();
 
 	/* Default bootfs - but ignore failure, in case emu0 doesn't exist */
 	vfs_setbootfs("emu0");

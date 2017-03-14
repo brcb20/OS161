@@ -617,6 +617,7 @@ static const char *testmenu[] = {
 	"[semu1-22] Semaphore unit tests     ",
 	"[pt1] Process table test            ",
 	"[pt2] Process table concurrency test ",
+	"[fh1] Open file table test 		 ",
 	"[fs1] Filesystem test               ",
 	"[fs2] FS read stress                ",
 	"[fs3] FS write stress               ",
@@ -799,6 +800,9 @@ static struct {
 	/* Process table tests */
 	{ "pt1", 	proctest },
 	{ "pt2", 	proctest2 },
+
+	/* Open file table tests */
+	{ "fh1",    fhtest },
 
 	/* file system assignment tests */
 	{ "fs1",	fstest },
