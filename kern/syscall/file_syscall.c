@@ -181,3 +181,56 @@ sys_write(int fd, userptr_t buffer, size_t buflen, int32_t *ret)
 	*ret = buflen - u.uio_resid;
 	return result;
 }
+
+/*
+ * dup2 syscall
+ */
+int 
+sys_dup2(int oldfd, int newfd)
+{
+	KASSERT(curproc != NULL);
+
+	struct proc *proc = curproc;
+	struct fd *oldfd_ptr, *newfd_ptr;
+	unsigned num, newnum;
+	int result;
+
+	num = fdarray_num(proc->fds);
+
+	/* Check if valid file descriptor */
+	if (oldfd < 0                   || 
+		newfd < 0                   || 
+		num <= (unsigned)oldfd      || 
+		(unsigned)newfd >= OPEN_MAX) 
+		return EBADF;
+
+	if (oldfd == newfd)
+		return 0;
+
+	oldfd_ptr = fdarray_get(proc->fds, oldfd);
+	if (oldfd_ptr == NULL)
+		return EBADF;
+
+	if ((unsigned)newfd >= num) {
+		result = fdarray_setsize(proc->fds, newfd + 1);
+		if (result)
+			return result;
+		goto skip;
+	}
+
+	newfd_ptr = fdarray_get(proc->fds, newfd);
+	if (newfd_ptr != NULL)
+		fh_dec(newfd_ptr);
+
+skip:
+	/* Null any new spaces in fdarray */
+	newnum = fdarray_num(proc->fds);
+	for (unsigned i = num; i < newnum-1; i++)
+		fdarray_set(proc->fds, newfd, NULL);
+	/* Insert copy of oldfd */
+	fdarray_set(proc->fds, newfd, oldfd_ptr);
+	/* Increment refcount of file handle */
+	fh_inc(oldfd_ptr);
+
+	return 0;
+}

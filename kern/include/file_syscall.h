@@ -13,5 +13,7 @@ int sys_close(int fd);
 int sys_read(int fd, userptr_t buffer, size_t buflen, int32_t *ret);
 /* write */
 int sys_write(int fd, userptr_t buffer, size_t buflen, int32_t *ret);
+/* Dup2 */
+int sys_dup2(int oldfd, int newfd);
 
 #endif
