@@ -1,6 +1,8 @@
 #include <types.h>
 #include <kern/errno.h>
 #include <kern/fcntl.h>
+#include <kern/seek.h>
+#include <kern/stat.h>
 #include <limits.h>
 #include <copyinout.h>
 #include <uio.h>
@@ -16,7 +18,7 @@
 int
 sys_open(const_userptr_t path_ptr, int flags, int32_t *ret)
 {
-	KASSERT(curthread != NULL);
+	KASSERT(curproc != NULL);
 
 	struct proc *proc = curproc;
 	struct fd *fd;
@@ -65,7 +67,7 @@ end:
 int
 sys_close(int fd)
 {
-	KASSERT(curthread != NULL);
+	KASSERT(curproc != NULL);
 
 	struct proc *proc = curproc;
 	struct fd *fd_ptr;
@@ -90,7 +92,7 @@ sys_close(int fd)
 int
 sys_read(int fd, userptr_t buffer, size_t buflen, int32_t *ret)
 {
-	KASSERT(curthread != NULL);
+	KASSERT(curproc != NULL);
 
 	struct proc *proc = curproc;
 	struct fhandle *fh;
@@ -139,7 +141,7 @@ sys_read(int fd, userptr_t buffer, size_t buflen, int32_t *ret)
 int
 sys_write(int fd, userptr_t buffer, size_t buflen, int32_t *ret)
 {
-	KASSERT(curthread != NULL);
+	KASSERT(curproc != NULL);
 
 	struct proc *proc = curproc;
 	struct fhandle *fh;
@@ -180,6 +182,74 @@ sys_write(int fd, userptr_t buffer, size_t buflen, int32_t *ret)
 	
 	*ret = buflen - u.uio_resid;
 	return result;
+}
+
+/*
+ * lseek syscall
+ */
+int 
+sys_lseek(int fd, uint32_t u_off, uint32_t l_off, userptr_t whence_ptr, int32_t *ret1, int32_t *ret2)
+{
+	KASSERT(curproc != NULL);
+
+	struct proc *proc = curproc;
+	struct fd *fd_ptr;
+	struct fhandle *fh_ptr;
+	struct stat statbuf;
+	int result;
+	int32_t whence; 
+	off_t pos;
+
+	/* Check if valid file descriptor */
+	if (fd < 0 || fdarray_num(proc->fds) <= (unsigned)fd) 
+		return EBADF;
+
+	fd_ptr = fdarray_get(proc->fds, fd);
+	if (fd_ptr == NULL)
+		return EBADF;
+
+	fh_ptr = fd_ptr->fh;
+
+	if (!VOP_ISSEEKABLE(fh_ptr->open_v))
+		return ESPIPE;
+
+	result = copyin(whence_ptr, &whence, sizeof(int32_t));
+	if (result)
+		return result;
+	
+	/* set up pos */
+	pos = 0;
+	pos |= u_off;
+	pos <<= 32;
+	pos |= l_off;
+	
+	if (whence == SEEK_SET && pos >= 0) {
+		spinlock_acquire(&fh_ptr->fh_lock);
+		fh_ptr->offset = pos;
+		spinlock_release(&fh_ptr->fh_lock);
+	}
+	else if (whence == SEEK_CUR && (fh_ptr->offset + pos) >= 0) {
+		spinlock_acquire(&fh_ptr->fh_lock);
+		fh_ptr->offset += pos;
+		spinlock_release(&fh_ptr->fh_lock);
+	}
+	else if (whence == SEEK_END) {
+		result = VOP_STAT(fh_ptr->open_v, &statbuf);
+		if (result)
+			return result;
+		if ((statbuf.st_size + pos) < 0)
+			return EINVAL;
+		spinlock_acquire(&fh_ptr->fh_lock);
+		fh_ptr->offset = statbuf.st_size + pos;
+		spinlock_release(&fh_ptr->fh_lock);
+	}
+	else {
+		return EINVAL;
+	}
+	*ret1 = (int32_t)((int64_t)fh_ptr->offset >> 32);
+	*ret2 = (int32_t)(((int64_t)fh_ptr->offset << 32) >> 32);
+
+	return 0;
 }
 
 /*
