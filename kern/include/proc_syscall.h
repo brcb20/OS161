@@ -1,11 +1,17 @@
 #ifndef _PROC_SYSCALL_H
 #define _PROC_SYSCALL_H
 
+#include <cdefs.h>
+
 /*
  * Prototypes for process related syscalls
  */
 
+/* fork */
+int sys_fork(struct trapframe *c_tf, int32_t *ret);
 /* _exit */
-void sys__exit(int exitcode);
+__DEAD void sys__exit(int exitcode);
+/* getpid */
+void sys_getpid(int32_t *ret);
 
 #endif

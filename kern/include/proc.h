@@ -64,8 +64,8 @@ DEFARRAY(fd, FDINLINE);
 /* 
  * Child Processes array
  */
-DECLARRAY_BYTYPE(cparray, pid_t, CPINLINE);
-DEFARRAY_BYTYPE(cparray, pid_t, CPINLINE);
+DECLARRAY_BYTYPE(cparray, struct proc, CPINLINE);
+DEFARRAY_BYTYPE(cparray, struct proc, CPINLINE);
 
 /*
  * Process structure.
@@ -120,8 +120,14 @@ void proc_bootstrap(void);
 /* Call once during system startup to allocate process table data struct */
 void proctable_bootstrap(void);
 
+/* Create a fresh proc */
+struct proc *proc_create(const char *name);
+
 /* Create a fresh process for use by runprogram(). */
 struct proc *proc_create_runprogram(const char *name);
+
+/* Exit a process: leaves barebones for parent proc */
+void proc_exit(struct proc *proc);
 
 /* Destroy a process. */
 void proc_destroy(struct proc *proc);
@@ -131,6 +137,9 @@ int proc_addthread(struct proc *proc, struct thread *t);
 
 /* Detach a thread from its process. */
 void proc_remthread(struct thread *t);
+
+/* Get an available pid from the process table */
+int proc_setpid(struct proc *proc);
 
 /* Fetch the address space of the current process. */
 struct addrspace *proc_getas(void);

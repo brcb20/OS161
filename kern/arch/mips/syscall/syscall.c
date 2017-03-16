@@ -137,8 +137,16 @@ syscall(struct trapframe *tf)
 		break;
 
 		/* Process syscall */
+		case SYS_fork:
+		err = sys_fork(tf, &retval1);
+		break;
+
 		case SYS__exit:
 		sys__exit(tf->tf_a0);
+		break;
+
+		case SYS_getpid:
+		sys_getpid(&retval1);
 		break;
 
 	    default:
@@ -186,7 +194,28 @@ syscall(struct trapframe *tf)
  * Thus, you can trash it and do things another way if you prefer.
  */
 void
-enter_forked_process(struct trapframe *tf)
+enter_forked_process(void *tf, unsigned long junk)
 {
-	(void)tf;
+	(void)junk;
+
+	struct trapframe n_tf;
+	struct trapframe *h_tf = (struct trapframe *)tf;
+
+	/* Push trapframe to new process stack from heap */
+	for (unsigned i = 0, size = sizeof(*h_tf); i < size; i++)
+		*((char *)&n_tf + i) = *((char *)h_tf + i);
+
+	kfree(h_tf);
+
+	/* Child return vals */
+	n_tf.tf_v0 = 0;
+	n_tf.tf_a3 = 0;
+	/*
+	 * advance the program counter, to avoid restarting
+	 * the syscall over and over again.
+	 */
+	n_tf.tf_epc += 4;
+
+	/* Return to usermode passing trapframe on new proc stack  */
+	mips_usermode(&n_tf);
 }

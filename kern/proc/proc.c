@@ -80,7 +80,6 @@ static struct spinlock proc_spinlock;
 /* 
  * Add process to the proc table
  */
-static
 int
 proc_setpid(struct proc *proc)
 {
@@ -130,7 +129,6 @@ rewind:
 /*
  * Create a proc structure.
  */
-static
 struct proc *
 proc_create(const char *name)
 {
@@ -194,7 +192,6 @@ proc_create(const char *name)
  * Cleans up process structure but leaves bare bones for
  * parent process to get exit value
  */
-static
 void
 proc_exit(struct proc *proc)
 {
