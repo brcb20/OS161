@@ -141,6 +141,10 @@ syscall(struct trapframe *tf)
 		err = sys_fork(tf, &retval1);
 		break;
 
+		case SYS_waitpid:
+		err = sys_waitpid((pid_t)tf->tf_a0, (userptr_t)tf->tf_a1, tf->tf_a2, &retval1);
+		break;
+
 		case SYS__exit:
 		sys__exit(tf->tf_a0);
 		break;
@@ -202,8 +206,7 @@ enter_forked_process(void *tf, unsigned long junk)
 	struct trapframe *h_tf = (struct trapframe *)tf;
 
 	/* Push trapframe to new process stack from heap */
-	for (unsigned i = 0, size = sizeof(*h_tf); i < size; i++)
-		*((char *)&n_tf + i) = *((char *)h_tf + i);
+	memcpy(&n_tf, h_tf, sizeof(*h_tf));
 
 	kfree(h_tf);
 
