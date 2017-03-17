@@ -8,6 +8,7 @@
 #include <kern/fcntl.h>
 #include <limits.h>
 #include <vfs.h>
+#include <synch.h>
 #include <table.h>
 #include <fhandle.h>
 
@@ -56,6 +57,13 @@ fh_add(int openflags, char *path, struct fd **ret)
 		return ENOMEM;
 	}
 
+	fh->fh_lock = lock_create("fh lock");
+	if (fh->fh_lock == NULL) {
+		kfree(fd);
+		kfree(fh);
+		return ENOMEM;
+	}
+
 	result = vfs_open(path, openflags, 0, &vn);
 	if (result) {
 		kfree(fd);
@@ -75,7 +83,7 @@ fh_add(int openflags, char *path, struct fd **ret)
 	/* Set up file handle */
 	fh->open_v = vn;
 	fh->mode = openflags & O_ACCMODE;
-	spinlock_init(&fh->fh_lock);
+	spinlock_init(&fh->ref_lock);
 	fh->refcount = 1;
 	fh->offset = 0;
 
@@ -90,9 +98,9 @@ fh_inc(struct fd *fd)
 {
 	KASSERT(fd->fh->refcount != 0);
 
-	spinlock_acquire(&fd->fh->fh_lock);
+	spinlock_acquire(&fd->fh->ref_lock);
 	++fd->fh->refcount;
-	spinlock_release(&fd->fh->fh_lock);
+	spinlock_release(&fd->fh->ref_lock);
 }
 
 void 
@@ -104,17 +112,18 @@ fh_dec(struct fd *fd)
 
 	fh = fd->fh;
 
-	spinlock_acquire(&fh->fh_lock);
+	spinlock_acquire(&fh->ref_lock);
 	--fh->refcount;
 	if (fh->refcount == 0) {
-		spinlock_release(&fh->fh_lock);
+		spinlock_release(&fh->ref_lock);
 		fhandletable_remove(fht, fd->index);
+		lock_destroy(fh->fh_lock);
 		vfs_close(fh->open_v);
-		spinlock_cleanup(&fh->fh_lock);
+		spinlock_cleanup(&fh->ref_lock);
 		kfree(fh);
 		kfree(fd);
 	}
 	else {
-		spinlock_release(&fh->fh_lock);
+		spinlock_release(&fh->ref_lock);
 	}
 }

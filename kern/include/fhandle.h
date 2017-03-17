@@ -4,16 +4,18 @@
 #include <spinlock.h>
 
 struct vnode;
+struct lock;
 
 /*
  * File handler structure
  */
 struct fhandle {
-	struct spinlock 	 fh_lock; 	/* Lock for this structure */
+	struct spinlock 	ref_lock; 	/* refcount lock */
 	unsigned volatile 	refcount; 	/* Number of connections to this handler */
-	off_t  				  offset;	/* offset in file */
+	off_t volatile  	  offset;	/* offset in file */
 	int                     mode;	/* file handle mode */
 	struct vnode 		 *open_v;   /* vnode being handled */
+	struct lock 	    *fh_lock;   /* Lock for this structure */
 };
 
 /* File descriptor structure */
