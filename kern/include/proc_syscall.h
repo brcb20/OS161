@@ -9,6 +9,8 @@
 
 /* fork */
 int sys_fork(struct trapframe *c_tf, int32_t *ret);
+/* waitpid */
+int sys_waitpid(pid_t pid, userptr_t status, int options, int32_t *ret);
 /* _exit */
 __DEAD void sys__exit(int exitcode);
 /* getpid */

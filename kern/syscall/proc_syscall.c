@@ -1,10 +1,14 @@
 #include <types.h>
+#include <lib.h>
 #include <kern/errno.h>
+#include <kern/wait.h>
+#include <limits.h>
 #include <current.h> 
 #include <proc.h>
 #include <fhandle.h>
 #include <synch.h>
 #include <mips/trapframe.h>
+#include <copyinout.h>
 #include <thread.h>
 #include <addrspace.h>
 #include <vnode.h>
@@ -31,8 +35,7 @@ sys_fork(struct trapframe *c_tf, int32_t *ret)
 		return ENOMEM;
 
 	/* Push trapframe to heap from current stack */
-	for (i = 0; i < sizeof(*h_tf); i++)
-		*((char *)h_tf + i) = *((char *)c_tf + i);
+	memcpy(h_tf, c_tf, sizeof(*h_tf));
 
 	/*
 	 * New process setup 
@@ -119,11 +122,74 @@ sys__exit(int exitcode) {
 	struct proc *proc = curproc;
 
 	proc->exited = true;
-	proc->exit_val = exitcode;
+	proc->exit_val = _MKWAIT_EXIT(exitcode);
 	V(proc->exit_sem);
 	thread_exit();
 }
 
+/*
+ * waitpid 
+ */
+int
+sys_waitpid(pid_t pid, userptr_t status, int options, int32_t *ret)
+{
+	KASSERT(curproc != NULL);
+
+	struct proc *childproc;
+	unsigned num, i;
+	int result, exit_val;
+	size_t stoplen;
+	
+	/* Check options */
+	if (options != 0)
+		return EINVAL;
+
+	/* Check pid is within std range */
+	if (pid < PID_MIN || pid > PID_MAX)
+		return ESRCH;
+
+	/* Check status pointer is valid */
+	if (status != NULL) {
+		result = copycheck(status, sizeof(int), &stoplen);
+		if (result)
+			return result;
+
+		if (stoplen != sizeof(int))
+			return EFAULT;
+	}
+
+	/* Check pid is child proc */
+	num = cparray_num(curproc->cps);
+	i = 0;
+	while (i < num && pid != (childproc = cparray_get(curproc->cps, i))->pid)
+		++i;
+
+	if (i == num)
+		return ECHILD;
+
+	if (childproc->exited)
+		goto exited;
+				
+	/* Wait for child proc to exit */
+	P(childproc->exit_sem);
+
+exited:
+	if (WIFEXITED(childproc->exit_val))
+		exit_val = WEXITSTATUS(childproc->exit_val);
+	else if (WIFSIGNALED(childproc->exit_val))
+		exit_val = WTERMSIG(childproc->exit_val);
+	else /* STOPPED */
+		exit_val = WSTOPSIG(childproc->exit_val);
+
+	copyout(&exit_val, status, sizeof(int)); /* shoudn't fail */
+
+	*ret = childproc->pid;
+
+	proc_destroy(childproc);
+	cparray_remove(curproc->cps, i); 
+
+	return 0;
+}
 /* 
  * getpid
  */
