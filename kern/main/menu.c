@@ -578,9 +578,6 @@ cmd_opsmenu(int n, char **a)
 static const char *testmenu[] = {
 	"[at]  Array test                    ",
 	"[at2] Large array test              ",
-	"[tbt] Table test 					 ",
-	"[tbt2] Threaded Table test 		 ",
-	"[tbt3] Max concurrency Table test   ",
 	"[bt]  Bitmap test                   ",
 	"[tlt] Threadlist test               ",
 	"[km1] Kernel malloc test            ",
@@ -615,9 +612,6 @@ static const char *testmenu[] = {
 	"[sp2] Stoplight test         (1)    ",
 #endif
 	"[semu1-22] Semaphore unit tests     ",
-	"[pt1] Process table test            ",
-	"[pt2] Process table concurrency test ",
-	"[fh1] Open file table test 		 ",
 	"[fs1] Filesystem test               ",
 	"[fs2] FS read stress                ",
 	"[fs3] FS write stress               ",
