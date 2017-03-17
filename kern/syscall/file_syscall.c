@@ -10,6 +10,7 @@
 #include <current.h>
 #include <fhandle.h>
 #include <proc.h>
+#include <synch.h>
 #include <file_syscall.h>
 
 /*
@@ -111,25 +112,31 @@ sys_read(int fd, userptr_t buffer, size_t buflen, int32_t *ret)
 	if (fd_ptr == NULL || (fh = fd_ptr->fh)->mode == O_WRONLY)
 		return EBADF;
 
-	/* Build uio for data transfer */
+	/* Build uio for data transfer; offset is set atomically */
 	iov.iov_ubase = buffer;
 	iov.iov_len = buflen;
 	u.uio_iov = &iov;
 	u.uio_iovcnt = 1;
 	u.uio_resid = buflen;
-	u.uio_offset = fh->offset;
 	u.uio_segflg = UIO_USERSPACE;
 	u.uio_rw = UIO_READ;
 	u.uio_space = proc_getas();
 
+	/*
+	 * Must make atomic with respect to other threads
+	 * accessing the same file handle
+	 */
+	lock_acquire(fh->fh_lock);
+	u.uio_offset = fh->offset;
 	result = VOP_READ(fh->open_v, &u);
-	if (result)
+	if (result) {
+		lock_release(fh->fh_lock);
 		return result;
-	
+	}
+
 	/* Update offset */
-	spinlock_acquire(&fh->fh_lock);
 	fh->offset = u.uio_offset;
-	spinlock_release(&fh->fh_lock);
+	lock_release(fh->fh_lock);
 	
 	*ret = buflen - u.uio_resid;
 	return result;
@@ -160,25 +167,32 @@ sys_write(int fd, userptr_t buffer, size_t buflen, int32_t *ret)
 	if (fd_ptr == NULL || (fh = fd_ptr->fh)->mode == O_RDONLY)
 		return EBADF;
 
-	/* Build uio for data transfer */
+	/* Build uio for data transfer; offset is set atomically */
 	iov.iov_ubase = buffer;
 	iov.iov_len = buflen;
 	u.uio_iov = &iov;
 	u.uio_iovcnt = 1;
 	u.uio_resid = buflen;
-	u.uio_offset = fh->offset;
 	u.uio_segflg = UIO_USERSPACE;
 	u.uio_rw = UIO_WRITE;
 	u.uio_space = proc_getas();
 
+	/*
+	 * Must make atomic with respect to other threads
+	 * accessing the same file handle
+	 */
+	lock_acquire(fh->fh_lock);
+	u.uio_offset = fh->offset;
+
 	result = VOP_WRITE(fh->open_v, &u);
-	if (result)
+	if (result) {
+		lock_release(fh->fh_lock);
 		return result;
+	}
 	
 	/* Update offset */
-	spinlock_acquire(&fh->fh_lock);
 	fh->offset = u.uio_offset;
-	spinlock_release(&fh->fh_lock);
+	lock_release(fh->fh_lock);
 	
 	*ret = buflen - u.uio_resid;
 	return result;
@@ -198,7 +212,7 @@ sys_lseek(int fd, uint32_t u_off, uint32_t l_off, userptr_t whence_ptr, int32_t 
 	struct stat statbuf;
 	int result;
 	int32_t whence; 
-	off_t pos;
+	off_t pos, newoff;
 
 	/* Check if valid file descriptor */
 	if (fd < 0 || fdarray_num(proc->fds) <= (unsigned)fd) 
@@ -223,31 +237,34 @@ sys_lseek(int fd, uint32_t u_off, uint32_t l_off, userptr_t whence_ptr, int32_t 
 	pos <<= 32;
 	pos |= l_off;
 	
+	lock_acquire(fh_ptr->fh_lock);
 	if (whence == SEEK_SET && pos >= 0) {
-		spinlock_acquire(&fh_ptr->fh_lock);
 		fh_ptr->offset = pos;
-		spinlock_release(&fh_ptr->fh_lock);
 	}
 	else if (whence == SEEK_CUR && (fh_ptr->offset + pos) >= 0) {
-		spinlock_acquire(&fh_ptr->fh_lock);
 		fh_ptr->offset += pos;
-		spinlock_release(&fh_ptr->fh_lock);
 	}
 	else if (whence == SEEK_END) {
 		result = VOP_STAT(fh_ptr->open_v, &statbuf);
-		if (result)
+		if (result) {
+			lock_release(fh_ptr->fh_lock);
 			return result;
-		if ((statbuf.st_size + pos) < 0)
+		}
+		if ((statbuf.st_size + pos) < 0) {
+			lock_release(fh_ptr->fh_lock);
 			return EINVAL;
-		spinlock_acquire(&fh_ptr->fh_lock);
+		}
 		fh_ptr->offset = statbuf.st_size + pos;
-		spinlock_release(&fh_ptr->fh_lock);
 	}
 	else {
+		lock_release(fh_ptr->fh_lock);
 		return EINVAL;
 	}
-	*ret1 = (int32_t)((int64_t)fh_ptr->offset >> 32);
-	*ret2 = (int32_t)(((int64_t)fh_ptr->offset << 32) >> 32);
+	newoff = fh_ptr->offset;
+	lock_release(fh_ptr->fh_lock);
+
+	*ret1 = (int32_t)((int64_t)newoff >> 32);
+	*ret2 = (int32_t)(((int64_t)newoff << 32) >> 32);
 
 	return 0;
 }
