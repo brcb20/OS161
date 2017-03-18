@@ -205,6 +205,7 @@ proc_exit(struct proc *proc)
 	int index;
 	struct fd *fd;
 
+
 	/* VFS fields */
 	if (proc->p_cwd) {
 		VOP_DECREF(proc->p_cwd);
@@ -277,6 +278,10 @@ proc_exit(struct proc *proc)
 		cparray_remove(proc->cps, index - 1);
 	}
 	cparray_destroy(proc->cps);
+
+	/* Let the parent process collect exit status */
+	proc->exited = true;
+	V(proc->exit_sem);
 
 	KASSERT(proc->p_numthreads == 0);
 }
