@@ -143,9 +143,19 @@ proc_create(const char *name)
 		kfree(proc);
 		return NULL;
 	}
+
+	/* main lock */
+	proc->p_mainlock = lock_create("proc mainlock");
+	if (proc->p_mainlock == NULL) {
+		kfree(proc->p_name);
+		kfree(proc);
+		return NULL;
+	}
+
 	/* Handle exit */
 	proc->exit_sem = sem_create("exit sem", 0);
 	if (proc->exit_sem == NULL) {
+		lock_destroy(proc->p_mainlock);
 		kfree(proc->p_name);
 		kfree(proc);
 		return NULL;
@@ -205,6 +215,8 @@ proc_exit(struct proc *proc)
 	int index;
 	struct fd *fd;
 
+	/* main lock */
+	lock_destroy(proc->p_mainlock);
 
 	/* VFS fields */
 	if (proc->p_cwd) {
@@ -396,9 +408,6 @@ proc_create_runprogram(const char *name)
 	else
 		newproc->ppid = curproc->pid;
 
-	/*
-	 * TODO might be able to use fork instead of this
-	 */
 	/* Stds */
 	if (newproc->ppid == 0) {
 		path = kmalloc(sizeof(char)*5);
