@@ -81,7 +81,8 @@ sys_fork(struct trapframe *c_tf, int32_t *ret)
 			goto fail1;
 		}
 		KASSERT(i == index);
-		fh_inc(fd);
+		if (fd != NULL)
+			fh_inc(fd);
 	}
 	lock_release(proc->p_mainlock);
 
