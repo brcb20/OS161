@@ -53,6 +53,7 @@ struct addrspace;
 struct thread;
 struct semaphore;
 struct vnode;
+struct lock;
 struct fd;
 
 /* 
@@ -87,6 +88,7 @@ DEFARRAY_BYTYPE(cparray, struct proc, CPINLINE);
 struct proc {
 	char *p_name;			/* Name of this process */
 	struct spinlock p_lock;		/* Lock for this structure */
+	struct lock *p_mainlock;
 	unsigned p_numthreads;		/* Number of threads in this process */
 
 	/* PIDs */
