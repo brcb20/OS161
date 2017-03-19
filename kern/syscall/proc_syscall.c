@@ -376,7 +376,8 @@ sys_waitpid(pid_t pid, userptr_t status, int options, int32_t *ret)
 				*proc = curproc;
 	unsigned num, i;
 	int result, exit_val;
-	size_t stoplen;
+
+	exit_val = 0;
 	
 	/* Check options */
 	if (options != 0)
@@ -388,12 +389,9 @@ sys_waitpid(pid_t pid, userptr_t status, int options, int32_t *ret)
 
 	/* Check status pointer is valid */
 	if (status != NULL) {
-		result = copycheck(status, sizeof(int), &stoplen);
+		result = copyout(&exit_val, status, sizeof(int));
 		if (result)
 			return result;
-
-		if (stoplen != sizeof(int))
-			return EFAULT;
 	}
 
 	/* Check pid is child proc */
