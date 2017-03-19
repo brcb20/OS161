@@ -33,6 +33,9 @@ sys_fork(struct trapframe *c_tf, int32_t *ret)
 	int result;
 	unsigned num, index, i;
 
+	/* silence warning */
+	index = 0;
+
 	h_tf = kmalloc(sizeof(*h_tf));
 	if (h_tf == NULL)
 		return ENOMEM;
@@ -68,13 +71,19 @@ sys_fork(struct trapframe *c_tf, int32_t *ret)
 	 * TODO You might need to protect this from other threads
 	 * if you choose to implement multi threaded processes
 	 */
+	lock_acquire(proc->p_mainlock);
 	num = fdarray_num(proc->fds);
 	for (i = 0; i < num; i++) {
 		fd = fdarray_get(proc->fds, i);
 		result = fdarray_add(newproc->fds, fd, &index);
-		if (result) { goto fail1; }
+		if (result) { 
+			lock_release(proc->p_mainlock);
+			goto fail1;
+		}
+		KASSERT(i == index);
 		fh_inc(fd);
 	}
+	lock_release(proc->p_mainlock);
 
 	/* VFS fields */
 
@@ -186,7 +195,7 @@ copyargv(struct addrspace *old_as, struct addrspace *new_as, userptr_t old_args,
 				goto fail;
 			}
 			else {
-				b_size += PATH_MAX;
+				b_size *= 2;
 				kfree(k_buffer);
 				k_buffer = kmalloc(b_size);
 				if (k_buffer == NULL)
@@ -226,6 +235,7 @@ copyargv(struct addrspace *old_as, struct addrspace *new_as, userptr_t old_args,
 	}
 
 success:
+	kfree(k_buffer);
 	proc_setas(new_as);
 	as_activate();
 	stackptr -= (count + 1)*4;
@@ -268,6 +278,9 @@ sys_execv(const_userptr_t progname, userptr_t args)
 	int result, argc;
 	char *tmp_b;
 
+	if (args == NULL)
+		return EFAULT;
+
 	tmp_b = kmalloc(PATH_MAX);
 	if (tmp_b == NULL) {
 		return ENOMEM;
@@ -275,13 +288,17 @@ sys_execv(const_userptr_t progname, userptr_t args)
 
 	/* Copyin the progname */
 	result = copyinstr(progname, tmp_b, PATH_MAX, NULL);
-	if (result)
+	if (result) {
+		kfree(tmp_b);
 		return result;
+	}
 
 	/* Open the file. */
 	result = vfs_open(tmp_b, O_RDONLY, 0, &v);
-	if (result)
+	if (result) {
+		kfree(tmp_b);
 		return result;
+	}
 
 	kfree(tmp_b);
 
@@ -391,12 +408,7 @@ sys_waitpid(pid_t pid, userptr_t status, int options, int32_t *ret)
 	/* Wait for child proc to exit */
 	P(childproc->exit_sem);
 
-	if (WIFEXITED(childproc->exit_val))
-		exit_val = WEXITSTATUS(childproc->exit_val);
-	else if (WIFSIGNALED(childproc->exit_val))
-		exit_val = WTERMSIG(childproc->exit_val);
-	else /* STOPPED */
-		exit_val = WSTOPSIG(childproc->exit_val);
+	exit_val = childproc->exit_val;
 
 	if (status != NULL)
 		copyout(&exit_val, status, sizeof(int)); /* shoudn't fail */
