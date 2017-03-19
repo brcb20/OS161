@@ -136,6 +136,14 @@ syscall(struct trapframe *tf)
 		err = sys_dup2(tf->tf_a0, tf->tf_a1);
 		break;
 
+		case SYS_chdir:
+		err = sys_chdir((const_userptr_t)tf->tf_a0);
+		break;
+
+		case SYS___getcwd:
+		err = sys___getcwd((userptr_t)tf->tf_a0, (size_t)tf->tf_a1, &retval1);
+		break;
+
 		/* Process syscall */
 		case SYS_fork:
 		err = sys_fork(tf, &retval1);
