@@ -7,6 +7,7 @@
 #include <copyinout.h>
 #include <uio.h>
 #include <vnode.h>
+#include <vfs.h>
 #include <current.h>
 #include <fhandle.h>
 #include <proc.h>
@@ -29,17 +30,25 @@ sys_open(const_userptr_t path_ptr, int flags, int32_t *ret)
 
 	i = val = 0;
 
+	/* Lock this operation */
+	lock_acquire(proc->p_mainlock);
 	num = fdarray_num(proc->fds);
-
 	KASSERT(num <= OPEN_MAX);
 	
 	while (i < num && fdarray_get(proc->fds, i) != NULL)
 		i++;
 
-	if (i == num && num == OPEN_MAX) 
+	if (i == num && num == OPEN_MAX) {
+		lock_release(proc->p_mainlock);
 		return EMFILE;
+	}
 
 	path = kmalloc(sizeof(char) * PATH_MAX);
+	if (path == NULL) {
+		lock_release(proc->p_mainlock);
+		return ENOMEM;
+	}
+
 	result = copyinstr(path_ptr, path, PATH_MAX, NULL);  
 	if (result)
 		goto end;
@@ -58,6 +67,7 @@ sys_open(const_userptr_t path_ptr, int flags, int32_t *ret)
 	}
 
 end:
+	lock_release(proc->p_mainlock);
 	kfree(path);
 	return result;
 }
@@ -73,16 +83,22 @@ sys_close(int fd)
 	struct proc *proc = curproc;
 	struct fd *fd_ptr;
 
+	lock_acquire(proc->p_mainlock);
 	/* Check if valid file descriptor */
-	if (fd < 0 || fdarray_num(proc->fds) <= (unsigned)fd) 
+	if (fd < 0 || fdarray_num(proc->fds) <= (unsigned)fd) {
+		lock_release(proc->p_mainlock);
 		return EBADF;
+	}
 
 	fd_ptr = fdarray_get(proc->fds, fd);
-	if (fd_ptr == NULL)
+	if (fd_ptr == NULL) {
+		lock_release(proc->p_mainlock);
 		return EBADF;
+	}
 
 	fh_dec(fd_ptr);
 	fdarray_set(proc->fds, fd, NULL);
+	lock_release(proc->p_mainlock);
 
 	return 0;
 }
@@ -282,26 +298,35 @@ sys_dup2(int oldfd, int newfd)
 	unsigned num, newnum;
 	int result;
 
+	lock_acquire(proc->p_mainlock);
 	num = fdarray_num(proc->fds);
 
 	/* Check if valid file descriptor */
 	if (oldfd < 0                   || 
 		newfd < 0                   || 
 		num <= (unsigned)oldfd      || 
-		(unsigned)newfd >= OPEN_MAX) 
+		(unsigned)newfd >= OPEN_MAX) {
+		lock_release(proc->p_mainlock);
 		return EBADF;
+	}
 
-	if (oldfd == newfd)
+	if (oldfd == newfd) {
+		lock_release(proc->p_mainlock);
 		return 0;
+	}
 
 	oldfd_ptr = fdarray_get(proc->fds, oldfd);
-	if (oldfd_ptr == NULL)
+	if (oldfd_ptr == NULL) {
+		lock_release(proc->p_mainlock);
 		return EBADF;
+	}
 
 	if ((unsigned)newfd >= num) {
 		result = fdarray_setsize(proc->fds, newfd + 1);
-		if (result)
+		if (result) {
+			lock_release(proc->p_mainlock);
 			return result;
+		}
 		goto skip;
 	}
 
@@ -318,6 +343,70 @@ skip:
 	fdarray_set(proc->fds, newfd, oldfd_ptr);
 	/* Increment refcount of file handle */
 	fh_inc(oldfd_ptr);
+	lock_release(proc->p_mainlock);
 
 	return 0;
+}
+
+/* 
+ * chdir
+ */
+int
+sys_chdir(const_userptr_t pathname)
+{
+	KASSERT(curproc != NULL);
+
+	struct proc *proc = curproc;
+	int result;
+	char *path;
+
+	path = kmalloc(PATH_MAX);
+	if (path == NULL) {
+		return ENOMEM;
+	}
+
+	/* Copyin the pathname */
+	result = copyinstr(pathname, path, PATH_MAX, NULL);
+	if (result) {
+		kfree(path);
+		return result;
+	}
+
+	lock_acquire(proc->p_mainlock);
+	result = vfs_chdir(path);
+	lock_release(proc->p_mainlock);
+
+	return result;
+}
+
+/*
+ * __getcwd
+ */
+int
+sys___getcwd(userptr_t buf, size_t buflen, int32_t *ret)
+{
+	KASSERT(curproc != NULL);
+
+	struct proc *proc = curproc;
+	struct iovec iov;
+	struct uio u;
+	int result;
+
+	/* Build uio for data transfer */
+	iov.iov_ubase = buf;
+	iov.iov_len = buflen;
+	u.uio_offset = 0;
+	u.uio_iov = &iov;
+	u.uio_iovcnt = 1;
+	u.uio_resid = buflen;
+	u.uio_segflg = UIO_USERSPACE;
+	u.uio_rw = UIO_READ;
+	u.uio_space = proc_getas();
+
+	lock_acquire(proc->p_mainlock);
+	result = vfs_getcwd(&u);
+	lock_release(proc->p_mainlock);
+
+	*ret = buflen - u.uio_resid;
+	return result;
 }
