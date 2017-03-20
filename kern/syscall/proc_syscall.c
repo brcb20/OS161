@@ -117,6 +117,7 @@ sys_fork(struct trapframe *c_tf, int32_t *ret)
 	return result;
 
 fail1:
+	KASSERT(newproc->p_numthreads == 0);
 	proc_exit(newproc);
 
 fail2:
