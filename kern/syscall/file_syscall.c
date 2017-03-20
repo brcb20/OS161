@@ -27,6 +27,7 @@ sys_open(const_userptr_t path_ptr, int flags, int32_t *ret)
 	int result;
 	unsigned num, i, val;
 	char *path;
+	size_t len = 32;
 
 	i = val = 0;
 
@@ -43,15 +44,30 @@ sys_open(const_userptr_t path_ptr, int flags, int32_t *ret)
 		return EMFILE;
 	}
 
-	path = kmalloc(sizeof(char) * PATH_MAX);
+	path = kmalloc(len);
 	if (path == NULL) {
 		lock_release(proc->p_mainlock);
 		return ENOMEM;
 	}
-
-	result = copyinstr(path_ptr, path, PATH_MAX, NULL);  
-	if (result)
-		goto end;
+	/* Copyin the pathname */
+	while ((result = copyinstr(path_ptr, path, len, NULL)) != 0) {
+		if (result == EFAULT) { 
+			goto end;
+		}
+		else {
+			if (len == PATH_MAX)
+				goto end;
+			kfree(path);
+			len *=2;
+			if (len > PATH_MAX)
+				len = PATH_MAX;
+			path = kmalloc(len);
+			if (path == NULL) {
+				lock_release(proc->p_mainlock);
+				return ENOMEM;
+			}
+		}
+	}
 
 	result = fh_add(flags, path, &fd);
 	if (result)
@@ -339,7 +355,7 @@ skip:
 	/* Null any new spaces in fdarray */
 	newnum = fdarray_num(proc->fds);
 	for (unsigned i = num; i < newnum-1; i++)
-		fdarray_set(proc->fds, newfd, NULL);
+		fdarray_set(proc->fds, i, NULL);
 	/* Insert copy of oldfd */
 	fdarray_set(proc->fds, newfd, oldfd_ptr);
 	/* Increment refcount of file handle */
@@ -361,17 +377,29 @@ sys_chdir(const_userptr_t pathname)
 	struct proc *proc = curproc;
 	int result;
 	char *path;
+	size_t len = 32;
 
-	path = kmalloc(PATH_MAX);
+	path = kmalloc(len);
 	if (path == NULL) {
 		return ENOMEM;
 	}
-
 	/* Copyin the pathname */
-	result = copyinstr(pathname, path, PATH_MAX, NULL);
-	if (result) {
-		kfree(path);
-		return result;
+	while ((result = copyinstr(pathname, path, len, NULL)) != 0) {
+		if (result == EFAULT) { 
+			kfree(path);
+			return result;
+		}
+		else {
+			kfree(path);
+			if (len == PATH_MAX)
+				return result;
+			len *=2;
+			if (len > PATH_MAX)
+				len = PATH_MAX;
+			path = kmalloc(len);
+			if (path == NULL)
+				return ENOMEM;
+		}
 	}
 
 	lock_acquire(proc->p_mainlock);

@@ -150,7 +150,8 @@ copyargv(struct addrspace *old_as, struct addrspace *new_as, userptr_t old_args,
 
 	int result;
 	unsigned i, count;
-	long space = ARG_MAX;
+	long space = ARG_MAX,
+		 tmp_space;
 	argv_t *head, *tail;
 	size_t actual,
 		   b_size = 64; 
@@ -193,8 +194,15 @@ copyargv(struct addrspace *old_as, struct addrspace *new_as, userptr_t old_args,
 				goto fail;
 			}
 			else {
-				b_size *= 2;
 				kfree(k_buffer);
+				if (b_size == ARG_MAX)
+					return result;
+				tmp_space = space - (b_size + 4);
+				if (tmp_space < 0)
+					return E2BIG;
+				b_size *=2;
+				if (b_size > ARG_MAX)
+					b_size = ARG_MAX;
 				k_buffer = kmalloc(b_size);
 				if (k_buffer == NULL)
 					goto fail;
@@ -280,7 +288,7 @@ sys_execv(const_userptr_t progname, userptr_t args)
 	if (args == NULL)
 		return EFAULT;
 
-	tmp_b = kmalloc(PATH_MAX);
+	tmp_b = kmalloc(tmp_size);
 	if (tmp_b == NULL) {
 		return ENOMEM;
 	}
