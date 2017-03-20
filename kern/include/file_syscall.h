@@ -16,7 +16,7 @@ int sys_write(int fd, userptr_t buffer, size_t buflen, int32_t *ret);
 /* lseek */
 int sys_lseek(int fd, uint32_t u_off, uint32_t l_off, userptr_t whence_ptr, int32_t *ret1, int32_t *ret2);
 /* Dup2 */
-int sys_dup2(int oldfd, int newfd);
+int sys_dup2(int oldfd, int newfd, int32_t *ret);
 /* chdir */
 int sys_chdir(const_userptr_t pathname);
 /* getcwd */
