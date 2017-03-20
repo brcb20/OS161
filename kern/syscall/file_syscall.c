@@ -289,7 +289,7 @@ sys_lseek(int fd, uint32_t u_off, uint32_t l_off, userptr_t whence_ptr, int32_t 
  * dup2 syscall
  */
 int 
-sys_dup2(int oldfd, int newfd)
+sys_dup2(int oldfd, int newfd, int32_t *ret)
 {
 	KASSERT(curproc != NULL);
 
@@ -312,6 +312,7 @@ sys_dup2(int oldfd, int newfd)
 
 	if (oldfd == newfd) {
 		lock_release(proc->p_mainlock);
+		*ret = newfd; 
 		return 0;
 	}
 
@@ -345,6 +346,7 @@ skip:
 	fh_inc(oldfd_ptr);
 	lock_release(proc->p_mainlock);
 
+	*ret = newfd; 
 	return 0;
 }
 
@@ -376,6 +378,7 @@ sys_chdir(const_userptr_t pathname)
 	result = vfs_chdir(path);
 	lock_release(proc->p_mainlock);
 
+	kfree(path);
 	return result;
 }
 
