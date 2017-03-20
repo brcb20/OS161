@@ -67,10 +67,6 @@ sys_fork(struct trapframe *c_tf, int32_t *ret)
 	if (result)
 		goto fail2;
 
-	/* File descriptor table
-	 * TODO You might need to protect this from other threads
-	 * if you choose to implement multi threaded processes
-	 */
 	lock_acquire(proc->p_mainlock);
 	num = fdarray_num(proc->fds);
 	for (i = 0; i < num; i++) {
@@ -157,7 +153,7 @@ copyargv(struct addrspace *old_as, struct addrspace *new_as, userptr_t old_args,
 	long space = ARG_MAX;
 	argv_t *head, *tail;
 	size_t actual,
-		   b_size = PATH_MAX; 
+		   b_size = 64; 
 	char *k_buffer, 
 		 *arg_ptr,
 		 **old_argv = (char **)old_args; /* Warning: userspace pointer */
@@ -279,6 +275,7 @@ sys_execv(const_userptr_t progname, userptr_t args)
 	vaddr_t entrypoint, stackptr;
 	int result, argc;
 	char *tmp_b;
+	size_t tmp_size = 32;
 
 	if (args == NULL)
 		return EFAULT;
@@ -287,12 +284,22 @@ sys_execv(const_userptr_t progname, userptr_t args)
 	if (tmp_b == NULL) {
 		return ENOMEM;
 	}
-
-	/* Copyin the progname */
-	result = copyinstr(progname, tmp_b, PATH_MAX, NULL);
-	if (result) {
-		kfree(tmp_b);
-		return result;
+	while ((result = copyinstr(progname, tmp_b, tmp_size, NULL)) != 0) {
+		if (result == EFAULT) { 
+			kfree(tmp_b);
+			return result;
+		}
+		else {
+			kfree(tmp_b);
+			if (tmp_size == PATH_MAX)
+				return result;
+			tmp_size *=2;
+			if (tmp_size > PATH_MAX)
+				tmp_size = PATH_MAX;
+			tmp_b = kmalloc(tmp_size);
+			if (tmp_b == NULL)
+				return ENOMEM;
+		}
 	}
 
 	/* Open the file. */
