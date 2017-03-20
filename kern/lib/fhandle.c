@@ -118,6 +118,7 @@ fh_dec(struct fd *fd)
 	--fh->refcount;
 	if (fh->refcount == 0) {
 		spinlock_release(&fh->ref_lock);
+		KASSERT(fhandletable_get(fht, fd->index) == fh);
 		fhandletable_remove(fht, fd->index);
 		lock_destroy(fh->fh_lock);
 		vfs_close(fh->open_v);

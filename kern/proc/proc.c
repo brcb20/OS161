@@ -516,7 +516,8 @@ proc_remthread(struct thread *t)
 	spinlock_release(&proc->p_lock);
 
 	/* Need to remove process if no more threads but leave bare bones */
-	if (proc->p_numthreads == 0) 
+	if (proc != kproc &&
+		proc->p_numthreads == 0) 
 		proc_exit(proc);
 
 	spl = splhigh();
