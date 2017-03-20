@@ -96,6 +96,7 @@ fh_add(int openflags, char *path, struct fd **ret)
 void
 fh_inc(struct fd *fd) 
 {
+	KASSERT(fd != NULL);
 	KASSERT(fd->fh->refcount != 0);
 
 	spinlock_acquire(&fd->fh->ref_lock);
@@ -106,6 +107,7 @@ fh_inc(struct fd *fd)
 void 
 fh_dec(struct fd *fd)
 {
+	KASSERT(fd != NULL);
 	KASSERT(fd->fh->refcount > 0);
 
 	struct fhandle *fh;
