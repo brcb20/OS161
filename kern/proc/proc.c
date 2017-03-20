@@ -164,6 +164,7 @@ proc_create(const char *name)
 	proc->cps = cparray_create();
 	if (proc->cps == NULL) {
 		sem_destroy(proc->exit_sem);
+		lock_destroy(proc->p_mainlock);
 		kfree(proc->p_name);
 		kfree(proc);
 		return NULL;
@@ -173,6 +174,7 @@ proc_create(const char *name)
 	if (proc->fds == NULL) {
 		cparray_destroy(proc->cps);
 		sem_destroy(proc->exit_sem);
+		lock_destroy(proc->p_mainlock);
 		kfree(proc->p_name);
 		kfree(proc);
 		return NULL;
@@ -217,6 +219,7 @@ proc_exit(struct proc *proc)
 
 	/* main lock */
 	lock_destroy(proc->p_mainlock);
+	proc->p_mainlock = NULL;
 
 	/* VFS fields */
 	if (proc->p_cwd) {
@@ -282,6 +285,7 @@ proc_exit(struct proc *proc)
 		fdarray_remove(proc->fds, index - 1);
 	}
 	fdarray_destroy(proc->fds);
+	proc->fds = NULL;
 	
 	/*
 	 * Cleanup child process array
@@ -290,6 +294,7 @@ proc_exit(struct proc *proc)
 		cparray_remove(proc->cps, index - 1);
 	}
 	cparray_destroy(proc->cps);
+	proc->cps = NULL;
 
 	/* Let the parent process collect exit status */
 	proc->exited = true;
@@ -510,13 +515,13 @@ proc_remthread(struct thread *t)
 	proc->p_numthreads--;
 	spinlock_release(&proc->p_lock);
 
-	spl = splhigh();
-	t->t_proc = NULL;
-	splx(spl);
-
 	/* Need to remove process if no more threads but leave bare bones */
 	if (proc->p_numthreads == 0) 
 		proc_exit(proc);
+
+	spl = splhigh();
+	t->t_proc = NULL;
+	splx(spl);
 }
 
 /*
