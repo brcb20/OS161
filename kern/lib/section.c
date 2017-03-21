@@ -105,6 +105,7 @@ section_setfirst(struct section *section, void *val, unsigned start, unsigned en
 int
 section_add(struct section *section, void *val)
 {
+	SECTIONASSERT(section->num <= section->max);
 	unsigned index = 0;
 	if (section->num == section->max) {
 		return -1;
