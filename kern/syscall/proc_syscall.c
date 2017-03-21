@@ -57,7 +57,7 @@ sys_fork(struct trapframe *c_tf, int32_t *ret)
 	/* PID */
 	result = proc_setpid(newproc);
 	if (result)
-		goto fail2;
+		goto fail;
 
 	/* PPID */
 	newproc->ppid = proc->pid;
@@ -65,7 +65,7 @@ sys_fork(struct trapframe *c_tf, int32_t *ret)
 	/* VM fields */
 	result = as_copy(proc->p_addrspace, &newproc->p_addrspace); 
 	if (result)
-		goto fail2;
+		goto fail;
 
 	lock_acquire(proc->p_mainlock);
 	num = fdarray_num(proc->fds);
@@ -74,7 +74,7 @@ sys_fork(struct trapframe *c_tf, int32_t *ret)
 		result = fdarray_add(newproc->fds, fd, &index);
 		if (result) { 
 			lock_release(proc->p_mainlock);
-			goto fail1;
+			goto fail;
 		}
 		KASSERT(i == index);
 		if (fd != NULL)
@@ -100,23 +100,21 @@ sys_fork(struct trapframe *c_tf, int32_t *ret)
 	/* Add child process to array */
 	result = cparray_add(proc->cps, newproc, &index);
 	if (result) 
-		goto fail1;
+		goto fail;
 
 	/* Fork the thread */
 	result = thread_fork("Forked child thread", newproc, enter_forked_process, (void *)h_tf, 0);
 	if (result) {
 		cparray_remove(proc->cps, cparray_num(proc->cps) - 1);
-		goto fail1;
+		goto fail;
 	}
 
 	*ret = newproc->pid;
 	return result;
 
-fail1:
+fail:
 	KASSERT(newproc->p_numthreads == 0);
 	proc_exit(newproc);
-
-fail2:
 	proc_destroy(newproc);
 	kfree(h_tf);
 	return result;
@@ -186,33 +184,35 @@ copyargv(struct addrspace *old_as, struct addrspace *new_as, userptr_t old_args,
 	while (true) {
 		/* Get pointer to arg */
 		result = copyin((userptr_t)(old_argv +i), &arg_ptr, sizeof(arg_ptr));
-		if (result) { goto fail; }
+		if (result) { goto fail1; }
 		if (arg_ptr == NULL) { goto success; } 
 		/* Get argument */
 		while ((result = copyinstr((userptr_t)arg_ptr, k_buffer, b_size, &actual)) != 0) {
-			if (result == EFAULT) { 
-				goto fail;
-			}
-			else {
-				kfree(k_buffer);
+			if (result == ENAMETOOLONG) {
 				if (b_size == ARG_MAX)
-					return result;
+					goto fail1;
 				tmp_space = space - (b_size + 4);
-				if (tmp_space < 0)
-					return E2BIG;
+				if (tmp_space < 0) {
+					result = E2BIG;
+					goto fail1;
+				}
+				kfree(k_buffer);
 				b_size *=2;
 				if (b_size > ARG_MAX)
 					b_size = ARG_MAX;
 				k_buffer = kmalloc(b_size);
 				if (k_buffer == NULL)
-					goto fail;
+					goto fail2;
+			}
+			else {
+				goto fail1;
 			}
 		}
 		/* Check if ARG_MAX reached */
 		space -= ((actual - actual%4) + 8); // assumes pointers are 4 bytes
 		if (space < 0) {
 			result = E2BIG;
-			goto fail;
+			goto fail1;
 		}
 
 		/* Switch to new as */
@@ -228,7 +228,7 @@ copyargv(struct addrspace *old_as, struct addrspace *new_as, userptr_t old_args,
 		/* Add argument pointer to linked listt */
 		tail->arg = stackptr;
 		tail->next = kmalloc(sizeof(*tail));
-		if (tail->next == NULL) { goto fail; }
+		if (tail->next == NULL) { goto fail1; }
 		tail = tail->next;
 		tail->arg = NULL;
 		tail->next = NULL;
@@ -253,12 +253,16 @@ success:
 		kfree(head);
 		head = tail;
 	}
+	KASSERT(head == NULL);
 
 	*argc = (int)count;
 	*sp_ptr = (vaddr_t)stackptr;
 	return 0;
 
-fail:
+fail1:
+	kfree(k_buffer);
+
+fail2:
 	if (proc_getas() == new_as) {
 		proc_setas(old_as);
 		as_activate();
@@ -268,7 +272,6 @@ fail:
 		kfree(head);
 		head = tail;
 	}
-	kfree(k_buffer);
 	return result;
 }
 
@@ -293,11 +296,7 @@ sys_execv(const_userptr_t progname, userptr_t args)
 		return ENOMEM;
 	}
 	while ((result = copyinstr(progname, tmp_b, tmp_size, NULL)) != 0) {
-		if (result == EFAULT) { 
-			kfree(tmp_b);
-			return result;
-		}
-		else {
+		if (result == ENAMETOOLONG) {
 			kfree(tmp_b);
 			if (tmp_size == PATH_MAX)
 				return result;
@@ -307,6 +306,10 @@ sys_execv(const_userptr_t progname, userptr_t args)
 			tmp_b = kmalloc(tmp_size);
 			if (tmp_b == NULL)
 				return ENOMEM;
+		}
+		else {
+			kfree(tmp_b);
+			return result;
 		}
 	}
 
@@ -394,7 +397,7 @@ sys_waitpid(pid_t pid, userptr_t status, int options, int32_t *ret)
 	unsigned num, i;
 	int result, exit_val;
 
-	exit_val = 0;
+	i = exit_val = 0;
 	
 	/* Check options */
 	if (options != 0)
@@ -413,7 +416,6 @@ sys_waitpid(pid_t pid, userptr_t status, int options, int32_t *ret)
 
 	/* Check pid is child proc */
 	num = cparray_num(proc->cps);
-	i = 0;
 	while (i < num && pid != (childproc = cparray_get(proc->cps, i))->pid)
 		++i;
 

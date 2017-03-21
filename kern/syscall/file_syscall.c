@@ -51,10 +51,7 @@ sys_open(const_userptr_t path_ptr, int flags, int32_t *ret)
 	}
 	/* Copyin the pathname */
 	while ((result = copyinstr(path_ptr, path, len, NULL)) != 0) {
-		if (result == EFAULT) { 
-			goto end;
-		}
-		else {
+		if (result == ENAMETOOLONG) {
 			if (len == PATH_MAX)
 				goto end;
 			kfree(path);
@@ -66,6 +63,9 @@ sys_open(const_userptr_t path_ptr, int flags, int32_t *ret)
 				lock_release(proc->p_mainlock);
 				return ENOMEM;
 			}
+		}
+		else {
+			goto end;
 		}
 	}
 
@@ -385,11 +385,7 @@ sys_chdir(const_userptr_t pathname)
 	}
 	/* Copyin the pathname */
 	while ((result = copyinstr(pathname, path, len, NULL)) != 0) {
-		if (result == EFAULT) { 
-			kfree(path);
-			return result;
-		}
-		else {
+		if (result == ENAMETOOLONG) {
 			kfree(path);
 			if (len == PATH_MAX)
 				return result;
@@ -399,6 +395,10 @@ sys_chdir(const_userptr_t pathname)
 			path = kmalloc(len);
 			if (path == NULL)
 				return ENOMEM;
+		}
+		else {
+			kfree(path);
+			return result;
 		}
 	}
 
