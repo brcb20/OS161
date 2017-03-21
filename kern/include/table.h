@@ -285,7 +285,6 @@ table_remove(struct table *tb, unsigned long index)
 {
 	TABLEASSERT(index < tb->max);
 	struct container *container;
-	struct section *section;
 	unsigned rem = index % SECTION_SIZE,
 			 container_num = containerarray_num(tb->containers),
 			 sect_index = (index - rem)/SECTION_SIZE;
@@ -294,20 +293,17 @@ table_remove(struct table *tb, unsigned long index)
 		(container = containerarray_get(tb->containers, sect_index))->section == NULL)
 		return;
 
-	section_remove(container->section, rem);
-
 	/* Protect removal of section */
 	rwlock_acquire_write(container->section_lock);
+	section_remove(container->section, rem);
 	if (container->section == NULL ||
 		(section_num(container->section) != 0)) {
 		rwlock_release_write(container->section_lock);
 		goto end;
 	}
-	section = container->section;
+	section_destroy(container->section);
 	container->section = NULL;
 	rwlock_release_write(container->section_lock);
-
-	section_destroy(section);
 
 end:
 	spinlock_acquire(&tb->table_lock);
