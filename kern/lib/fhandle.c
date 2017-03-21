@@ -14,7 +14,6 @@
 
 #define OFT_SIZE OPEN_FILE_MAX/(sizeof(struct fhandle) + sizeof(struct fhandle *))
 
-
 /*
  * The Open File Table; this holds all file handles
  */
@@ -66,6 +65,7 @@ fh_add(int openflags, char *path, struct fd **ret)
 
 	result = vfs_open(path, openflags, 0, &vn);
 	if (result) {
+		lock_destroy(fh->fh_lock);
 		kfree(fd);
 		kfree(fh);
 		return result;
@@ -73,6 +73,7 @@ fh_add(int openflags, char *path, struct fd **ret)
 
 	result = fhandletable_setfirst(fht, fh, 0, &index);
 	if (result) {
+		lock_destroy(fh->fh_lock);
 		kfree(fd);
 		kfree(fh);
 		vfs_close(vn);
@@ -108,6 +109,7 @@ void
 fh_dec(struct fd *fd)
 {
 	KASSERT(fd != NULL);
+	KASSERT(fd->fh != NULL);
 	KASSERT(fd->fh->refcount > 0);
 
 	struct fhandle *fh;
