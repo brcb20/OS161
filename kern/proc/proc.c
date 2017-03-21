@@ -188,6 +188,8 @@ proc_create(const char *name)
 	spinlock_init(&proc->p_lock);
 
 	/* PID will be set separately */
+	proc->pid = 0;
+	proc->ppid = 0;
 
 	/* VM fields */
 	proc->p_addrspace = NULL;
@@ -326,6 +328,9 @@ proc_destroy(struct proc *proc)
 	KASSERT(proc != kproc);
 	/* Ensure proc_exit has been called */
 	KASSERT(proc->p_addrspace == NULL);
+	KASSERT(proc->cps == NULL);
+	KASSERT(proc->fds == NULL);
+	KASSERT(proc->exited);
 
 	/*
 	 * We don't take p_lock in here because we must have the only
@@ -337,6 +342,7 @@ proc_destroy(struct proc *proc)
 		proc->pid <= PID_MAX  && 
 		proctable_get(ptb, (unsigned long)proc->pid) == proc) {
 		proctable_remove(ptb, (unsigned long)proc->pid);
+		KASSERT(proc_num > 0);
 		spinlock_acquire(&proc_spinlock);
 		--proc_num;
 		spinlock_release(&proc_spinlock);
@@ -398,15 +404,9 @@ proc_create_runprogram(const char *name)
 		return NULL;
 	}
 
-	/* TODO may move outside to become part of
-	 * fork  so you can return the correct error 
-	 * values to errno 
-	 */
 	/* pid */
-	if (proc_setpid(newproc)) {
-		proc_destroy(newproc);
-		return NULL;
-	}
+	if (proc_setpid(newproc))
+		goto fail;
 	/* ppid */
 	if (curproc == kproc)
 		newproc->ppid = 0;
@@ -416,35 +416,25 @@ proc_create_runprogram(const char *name)
 	/* Stds */
 	if (newproc->ppid == 0) {
 		path = kmalloc(sizeof(char)*5);
-		if (path == NULL) {
-			proc_destroy(newproc);
-			return NULL;
-		}
+		if (path == NULL) { goto fail; }
 		strcpy(path, "con:");
 		result = fh_add(O_RDONLY, path, &fd);
 		if (result) {
-			proc_destroy(newproc);
 			kfree(path);
-			return NULL;
+			goto fail;
 		}
 		fdarray_add(newproc->fds, fd, &index);
 		for (int i = 0; i < 2; i++) {
 			strcpy(path, "con:");
 			result = fh_add(O_WRONLY, path, &fd);
 			if (result) {
-				while (fdarray_num(newproc->fds) != 0) {
-					fh_dec(fdarray_get(newproc->fds, 0));
-					fdarray_remove(newproc->fds, 0);
-				}
-				proc_destroy(newproc);
 				kfree(path);
-				return NULL;
+				goto fail;
 			}
 			fdarray_add(newproc->fds, fd, &index);
 		}	
 		kfree(path);
 	}
-	
 	/* VM fields */
 	newproc->p_addrspace = NULL;
 
@@ -463,6 +453,11 @@ proc_create_runprogram(const char *name)
 	spinlock_release(&curproc->p_lock);
 
 	return newproc;
+
+fail:
+	proc_exit(newproc);
+	proc_destroy(newproc);
+	return NULL;
 }
 
 /*
