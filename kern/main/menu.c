@@ -129,7 +129,6 @@ common_prog(int nargs, char **args)
 
 	tc = thread_count;
 
-	/* TODO replace with call to sys_fork */
 	result = thread_fork(args[0] /* thread name */,
 			proc /* new process */,
 			cmd_progthread /* thread function */,
@@ -137,6 +136,7 @@ common_prog(int nargs, char **args)
 	if (result) {
 		kprintf("thread_fork failed: %s\n", strerror(result));
 		/* This will currently fail */
+		proc_exit(proc);
 		proc_destroy(proc);
 		return result;
 	}
@@ -149,6 +149,7 @@ common_prog(int nargs, char **args)
 	// Wait for all threads to finish cleanup, otherwise khu be a bit behind,
 	// especially once swapping is enabled.
 	thread_wait_for_count(tc);
+	proc_destroy(proc);
 
 	return 0;
 }
