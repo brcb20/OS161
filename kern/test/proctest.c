@@ -17,7 +17,7 @@ proctest(int nargs, char **args)
 {
 	struct proc **proc;
 	unsigned long i;
-	unsigned j,
+	unsigned j, h,
 			 rem = (PID_MAX + 1 - PID_MIN)%PROC_MAX,
 			 loops = (PID_MAX + 1 - PID_MIN - rem)/PROC_MAX;
 
@@ -25,16 +25,20 @@ proctest(int nargs, char **args)
 	(void)args;
 
 	proc = kmalloc(sizeof(*proc)*PROC_MAX);
+	if (proc == NULL) {
+		panic("proc holder failed\n");
+	}
 
 	kprintf("Beginning process table testing...\n");
 	for (j = 0; j < loops; j++) { 
 		kprintf("Start of loop %u...\n", j);
-		for (i = j*PROC_MAX; i < (j+1)*PROC_MAX; i++) {
-			proc[i%PROC_MAX] = proc_create_runprogram("process");
-			KASSERT(proc[i%PROC_MAX] != NULL);
-			KASSERT((unsigned)proc[i%PROC_MAX]->pid == i+PID_MIN);
+		for (i = j*PROC_MAX, h =0; i < (j+1)*PROC_MAX; i++, h++) {
+			proc[h] = proc_create_runprogram("process");
+			KASSERT(proc[h] != NULL);
+			KASSERT((unsigned)proc[h]->pid == i+PID_MIN);
 		}
 		for (i = 0; i < PROC_MAX; i++) {
+			proc_exit(proc[i]);
 			proc_destroy(proc[i]);
 			proc[i] = NULL;
 		}
@@ -55,6 +59,7 @@ proctest(int nargs, char **args)
 	KASSERT(proc_create_runprogram("process") == NULL);
 
 	for (i = 0; i < PROC_MAX; i++) {
+		proc_exit(proc[i]);
 		proc_destroy(proc[i]);
 		proc[i] = NULL;
 	}
@@ -155,6 +160,7 @@ proctest2(int nargs, char **args)
 	for (i=0; i<NTHREADS; i++) {
 		for (k=0; k < PROC_MAX; k++) {
 			if (testprocs[i][k] != NULL) {
+				proc_exit(testprocs[i][k]);
 				proc_destroy(testprocs[i][k]);
 			}
 			testprocs[i][k] = NULL;
