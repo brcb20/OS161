@@ -76,7 +76,6 @@ proc_create_recursive(void *procarray, unsigned long index)
 	struct proc **testproc = (struct proc **)procarray;
 	unsigned i = 0,
 			 num = (unsigned)index;
-#define PMAX 1000
 
 	kprintf_n("Thread %u starting\n", num);
 	if (index == NTHREADS-1) { V(blocksem); }

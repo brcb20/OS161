@@ -24,13 +24,13 @@ fhtest(int argc, char **args)
 
 	for (i = 0; i < max; i++) {
 		strcpy(path, "con:");	
-		 result = fh_add(O_RDONLY, path, fds + i);
-		 if (result) { goto next; }
-		 KASSERT(*(fds+i) != NULL);
-		 KASSERT((*(fds+i))->index == i);
-		 KASSERT(fds[i]->fh->refcount == 1);
-		 fh_inc(fds[i]);
-		 KASSERT(fds[i]->fh->refcount == 2);
+		result = fh_add(O_RDONLY, path, fds + i);
+		if (result) { goto next; }
+		KASSERT(*(fds+i) != NULL);
+		KASSERT((*(fds+i))->index == i);
+		KASSERT(fds[i]->fh->refcount == 1);
+		fh_inc(fds[i]);
+		KASSERT(fds[i]->fh->refcount == 2);
 	}
 
 next:
