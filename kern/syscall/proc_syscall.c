@@ -120,6 +120,86 @@ fail:
 	return result;
 }
 
+/* 
+ * copyargv helper used to copy large arguments between address spaces
+ * without allocating large buffers
+ */
+static
+int
+copybigarg(struct addrspace *old_as, struct addrspace *new_as, userptr_t arg_ptr, userptr_t *stk_ptr, long *sp)
+{
+	int result, check;
+	long space = *sp;
+	size_t b_size,
+		   actual = PATH_MAX,
+		   arg_size = 0;
+	char *k_buffer;
+	userptr_t stackptr = *stk_ptr;
+	bool loop = true;
+
+	if (proc_getas() == new_as) {
+		proc_setas(old_as);
+		as_activate();
+	}
+
+	/* Kernel buffer */
+	k_buffer = kmalloc(PATH_MAX);
+	if (k_buffer == NULL) {
+		return ENOMEM;
+	}
+
+	result = ENAMETOOLONG;
+	space -= 4;
+
+	while (loop                                                            || 
+		   (result = copyinstr(arg_ptr, k_buffer, PATH_MAX, &actual)) == 0 ||
+		   result == ENAMETOOLONG) {
+		if (result) { 
+			check = copyin(arg_ptr, k_buffer, actual); 
+			if (check) {
+				kfree(k_buffer);
+				return check;
+			}
+			b_size = actual;
+		}
+		else {
+			b_size = actual - actual%4 + 4;
+		}
+
+		proc_setas(new_as);
+		as_activate();
+
+		if (arg_size > 0) {
+			memmove((void *)(stackptr-(arg_size+b_size)), (const void *)(stackptr-arg_size), arg_size);
+		}
+		check = copyout(k_buffer, stackptr-b_size, actual);
+		if (check) {
+			kfree(k_buffer);
+			return check;
+		}
+		if ((space -= b_size) < 0) {
+			kfree(k_buffer);
+			return E2BIG;
+		}
+		arg_size += b_size;	
+		if (result == 0) { goto end; }
+		arg_ptr += PATH_MAX;
+
+		proc_setas(old_as);
+		as_activate();
+		loop = false;
+	}
+
+	kfree(k_buffer);
+	return result;
+
+end:
+	kfree(k_buffer);
+	*sp = space;
+	*stk_ptr = stackptr - arg_size;
+	return 0;
+}
+		   
 /*
  * Helper function for the execv syscall
  *
@@ -189,8 +269,11 @@ copyargv(struct addrspace *old_as, struct addrspace *new_as, userptr_t old_args,
 		/* Get argument */
 		while ((result = copyinstr((userptr_t)arg_ptr, k_buffer, b_size, &actual)) != 0) {
 			if (result == ENAMETOOLONG) {
-				if (b_size == ARG_MAX)
-					goto fail1;
+				if (b_size == PATH_MAX) {
+					result = copybigarg(old_as, new_as, (userptr_t)arg_ptr, &stackptr, &space);
+					if (result) { goto fail1; }
+					goto skip;
+				}
 				tmp_space = space - (b_size + 4);
 				if (tmp_space < 0) {
 					result = E2BIG;
@@ -220,11 +303,12 @@ copyargv(struct addrspace *old_as, struct addrspace *new_as, userptr_t old_args,
 		as_activate();
 
 		stackptr -= (actual - actual%4) + 4;
-		++count;
 		/* Copy to new as */
 		result = copyoutstr(k_buffer, stackptr, actual, NULL);
 		KASSERT(result == 0);
 
+skip:
+		++count;
 		/* Add argument pointer to linked listt */
 		tail->arg = stackptr;
 		tail->next = kmalloc(sizeof(*tail));
