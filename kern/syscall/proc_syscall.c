@@ -232,7 +232,7 @@ copyargv(struct addrspace *old_as, struct addrspace *new_as, userptr_t old_args,
 		 tmp_space;
 	argv_t *head, *tail;
 	size_t actual,
-		   b_size = 64; 
+		   b_size = 64;  /* Must be a power of 2 */
 	char *k_buffer, 
 		 *arg_ptr,
 		 **old_argv = (char **)old_args; /* Warning: userspace pointer */
@@ -281,8 +281,6 @@ copyargv(struct addrspace *old_as, struct addrspace *new_as, userptr_t old_args,
 				}
 				kfree(k_buffer);
 				b_size *=2;
-				if (b_size > ARG_MAX)
-					b_size = ARG_MAX;
 				k_buffer = kmalloc(b_size);
 				if (k_buffer == NULL)
 					goto fail2;
@@ -370,7 +368,7 @@ sys_execv(const_userptr_t progname, userptr_t args)
 	vaddr_t entrypoint, stackptr;
 	int result, argc;
 	char *tmp_b;
-	size_t tmp_size = 32;
+	size_t tmp_size = 32; /* Must always be a power of 2 */
 
 	if (args == NULL)
 		return EFAULT;
@@ -385,8 +383,6 @@ sys_execv(const_userptr_t progname, userptr_t args)
 			if (tmp_size == PATH_MAX)
 				return result;
 			tmp_size *=2;
-			if (tmp_size > PATH_MAX)
-				tmp_size = PATH_MAX;
 			tmp_b = kmalloc(tmp_size);
 			if (tmp_b == NULL)
 				return ENOMEM;
