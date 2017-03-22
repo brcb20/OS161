@@ -17,6 +17,17 @@
 #include <syscall.h>
 #include <proc_syscall.h>
 
+static char k_buffer[ARG_MAX];
+static struct lock *kb_lock;
+
+void 
+sys_bootstrap()
+{
+	kb_lock = lock_create("Kernel buffer lock");
+	if (kb_lock == NULL)
+		panic("Kernel buffer lock failed\n");
+}
+
 /*
  * fork syscall
  */
@@ -120,86 +131,6 @@ fail:
 	return result;
 }
 
-/* 
- * copyargv helper used to copy large arguments between address spaces
- * without allocating large buffers
- */
-static
-int
-copybigarg(struct addrspace *old_as, struct addrspace *new_as, userptr_t arg_ptr, userptr_t *stk_ptr, long *sp)
-{
-	int result, check;
-	long space = *sp;
-	size_t b_size,
-		   actual = PATH_MAX,
-		   arg_size = 0;
-	char *k_buffer;
-	userptr_t stackptr = *stk_ptr;
-	bool loop = true;
-
-	if (proc_getas() == new_as) {
-		proc_setas(old_as);
-		as_activate();
-	}
-
-	/* Kernel buffer */
-	k_buffer = kmalloc(PATH_MAX);
-	if (k_buffer == NULL) {
-		return ENOMEM;
-	}
-
-	result = ENAMETOOLONG;
-	space -= 4;
-
-	while (loop                                                            || 
-		   (result = copyinstr(arg_ptr, k_buffer, PATH_MAX, &actual)) == 0 ||
-		   result == ENAMETOOLONG) {
-		if (result) { 
-			check = copyin(arg_ptr, k_buffer, actual); 
-			if (check) {
-				kfree(k_buffer);
-				return check;
-			}
-			b_size = actual;
-		}
-		else {
-			b_size = actual - actual%4 + 4;
-		}
-
-		proc_setas(new_as);
-		as_activate();
-
-		if (arg_size > 0) {
-			memmove((void *)(stackptr-(arg_size+b_size)), (const void *)(stackptr-arg_size), arg_size);
-		}
-		check = copyout(k_buffer, stackptr-b_size, actual);
-		if (check) {
-			kfree(k_buffer);
-			return check;
-		}
-		if ((space -= b_size) < 0) {
-			kfree(k_buffer);
-			return E2BIG;
-		}
-		arg_size += b_size;	
-		if (result == 0) { goto end; }
-		arg_ptr += PATH_MAX;
-
-		proc_setas(old_as);
-		as_activate();
-		loop = false;
-	}
-
-	kfree(k_buffer);
-	return result;
-
-end:
-	kfree(k_buffer);
-	*sp = space;
-	*stk_ptr = stackptr - arg_size;
-	return 0;
-}
-		   
 /*
  * Helper function for the execv syscall
  *
@@ -220,135 +151,101 @@ copyargv(struct addrspace *old_as, struct addrspace *new_as, userptr_t old_args,
 	KASSERT(sp_ptr != NULL);
 	KASSERT(*sp_ptr != 0);
 	KASSERT(proc_getas() == old_as || proc_getas() == new_as);
+	KASSERT(kb_lock != NULL);
 
 	typedef struct arg {
-		userptr_t arg;
+		size_t len;
 		struct arg *next;
 	} argv_t;
 
 	int result;
 	unsigned i, count;
-	long space = ARG_MAX,
-		 tmp_space;
 	argv_t *head, *tail;
-	size_t actual,
-		   b_size = 64;  /* Must be a power of 2 */
-	char *k_buffer, 
-		 *arg_ptr,
+	size_t actual, space;
+	char *arg_ptr,
 		 **old_argv = (char **)old_args; /* Warning: userspace pointer */
-	userptr_t stackptr = (userptr_t)*sp_ptr;
+	userptr_t tmp_ptr,
+			  stackptr = (userptr_t)*sp_ptr;
 
 	i = count = 0;
+	space = 0;
 
 	if (proc_getas() == new_as) {
 		proc_setas(old_as);
 		as_activate();
-	}
-
-	/* Kernel buffer */
-	k_buffer = kmalloc(b_size);
-	if (k_buffer == NULL) {
-		return ENOMEM;
 	}
 
 	/* Setup linked list of new argv */
 	head = kmalloc(sizeof(argv_t));
 	if (head == NULL) {
-		kfree(k_buffer);
 		return ENOMEM;
 	}
 	tail = head;
 	tail->next = NULL;
 
+	lock_acquire(kb_lock);
 	/* Loop through args */
 	while (true) {
 		/* Get pointer to arg */
 		result = copyin((userptr_t)(old_argv +i), &arg_ptr, sizeof(arg_ptr));
-		if (result) { goto fail1; }
+		if (result) { goto fail; }
 		if (arg_ptr == NULL) { goto success; } 
 		/* Get argument */
-		while ((result = copyinstr((userptr_t)arg_ptr, k_buffer, b_size, &actual)) != 0) {
-			if (result == ENAMETOOLONG) {
-				if (b_size == PATH_MAX) {
-					result = copybigarg(old_as, new_as, (userptr_t)arg_ptr, &stackptr, &space);
-					if (result) { goto fail1; }
-					goto skip;
-				}
-				tmp_space = space - (b_size + 4);
-				if (tmp_space < 0) {
-					result = E2BIG;
-					goto fail1;
-				}
-				kfree(k_buffer);
-				b_size *=2;
-				k_buffer = kmalloc(b_size);
-				if (k_buffer == NULL)
-					goto fail2;
-			}
-			else {
-				goto fail1;
-			}
-		}
-		/* Check if ARG_MAX reached */
-		space -= ((actual - actual%4) + 8); // assumes pointers are 4 bytes
-		if (space < 0) {
-			result = E2BIG;
-			goto fail1;
+		result = copyinstr((userptr_t)arg_ptr, k_buffer + space, ARG_MAX - space, &actual);
+		if (result) { 
+			if (result == ENAMETOOLONG)
+				result = E2BIG;
+			goto fail; 
 		}
 
-		/* Switch to new as */
-		proc_setas(new_as);
-		as_activate();
-
-		stackptr -= (actual - actual%4) + 4;
-		/* Copy to new as */
-		result = copyoutstr(k_buffer, stackptr, actual, NULL);
-		KASSERT(result == 0);
-
-skip:
-		++count;
 		/* Add argument pointer to linked listt */
-		tail->arg = stackptr;
+		tail->len = space;
 		tail->next = kmalloc(sizeof(*tail));
-		if (tail->next == NULL) { goto fail1; }
+		if (tail->next == NULL) { goto fail; }
 		tail = tail->next;
-		tail->arg = NULL;
+		tail->len = 0;
 		tail->next = NULL;
 
-		/* Switch back to old as */
-		proc_setas(old_as);
-		as_activate();
+		++count;
+		/* Check if ARG_MAX reached */
+		space += ((actual - actual%4) + 4); // assumes pointers are 4 bytes
+		if (space + (count*4) > ARG_MAX) {
+			result = E2BIG;
+			goto fail;
+		}
 
 		++i;
 	}
 
 success:
-	kfree(k_buffer);
-	proc_setas(new_as);
-	as_activate();
-	stackptr -= (count + 1)*4;
+	if (proc_getas() == old_as) {
+		proc_setas(new_as);
+		as_activate();
+	}
+	/* Copyout entire buffer */
+	stackptr -= space;
+	result = copyout(k_buffer, stackptr, space);
+	KASSERT(result == 0);
+	lock_release(kb_lock);
+
 	tail = head;
-	for (size_t i = 0; i < count+1; i++) {
-		result = copyout(&tail->arg, stackptr + i*4, 4);
+	for (size_t i = 0; i < count; i++) {
+		tmp_ptr = stackptr + tail->len;
+		result = copyout(&tmp_ptr, stackptr - (count+1-i)*4, 4);
 		KASSERT(result == 0);
 		tail = head->next;
 		kfree(head);
 		head = tail;
 	}
-	KASSERT(head == NULL);
+	KASSERT(head->next == NULL);
+	kfree(head);
 
 	*argc = (int)count;
-	*sp_ptr = (vaddr_t)stackptr;
+	*sp_ptr = (vaddr_t)(stackptr - (count+1)*4);
 	return 0;
 
-fail1:
-	kfree(k_buffer);
-
-fail2:
-	if (proc_getas() == new_as) {
-		proc_setas(old_as);
-		as_activate();
-	}
+fail:
+	lock_release(kb_lock);
 	while (head != NULL) {
 		tail = head->next;	
 		kfree(head);
@@ -368,15 +265,15 @@ sys_execv(const_userptr_t progname, userptr_t args)
 	vaddr_t entrypoint, stackptr;
 	int result, argc;
 	char *tmp_b;
-	size_t tmp_size = 32; /* Must always be a power of 2 */
+	size_t tmp_size = 256; /* Must always be a power of 2 */
 
 	if (args == NULL)
 		return EFAULT;
 
 	tmp_b = kmalloc(tmp_size);
-	if (tmp_b == NULL) {
+	if (tmp_b == NULL)
 		return ENOMEM;
-	}
+
 	while ((result = copyinstr(progname, tmp_b, tmp_size, NULL)) != 0) {
 		if (result == ENAMETOOLONG) {
 			kfree(tmp_b);

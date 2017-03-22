@@ -7,6 +7,7 @@
  * Prototypes for process related syscalls
  */
 
+void sys_bootstrap(void);
 /* fork */
 int sys_fork(struct trapframe *c_tf, int32_t *ret);
 /* Execv */
