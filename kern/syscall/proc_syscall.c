@@ -134,12 +134,8 @@ fail:
 /*
  * Helper function for the execv syscall
  *
- * Copies argv from the old address space to the stack of the
+ * Copies args from the old address space to the stack of the
  * new address space. 
- * The current address space must be the old or new as passed
- * in the arguments. If this function returns successfully  
- * it is guaranteed that the new address space will be activated,
- * on error the error code is returned and the old as is activated.
  */
 static
 int
